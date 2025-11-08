@@ -1,0 +1,160 @@
+.config-form {
+  background: var(--surface-panel);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border-stronger);
+  padding: var(--space-lg);
+  margin-bottom: var(--space-xl);
+}
+
+.config-form__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-lg);
+}
+
+.config-form__title {
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.config-form__toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color 0.2s ease, transform 0.2s ease;
+  border-radius: var(--radius-md);
+}
+
+.config-form__toggle:hover {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.config-form__toggle-icon--expanded {
+  transform: rotate(180deg);
+}
+
+.config-form__form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-lg);
+}
+
+.config-form__message {
+  padding: var(--space-md);
+  border-radius: var(--radius-md);
+  font-size: 0.9rem;
+}
+
+.config-form__message--error {
+  background: var(--danger-soft);
+  border: 1px solid var(--danger);
+  color: var(--danger);
+}
+
+.config-form__message--success {
+  background: var(--success-soft);
+  border: 1px solid var(--success);
+  color: var(--success);
+}
+
+.config-form__field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.config-form__label {
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.config-form__input,
+.config-form__textarea {
+  width: 100%;
+  padding: var(--space-sm) var(--space-md);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-stronger);
+  background: var(--surface-control);
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 0.9rem;
+  transition: border-color 0.2s ease;
+}
+
+.config-form__input:focus,
+.config-form__textarea:focus {
+  outline: none;
+  border-color: var(--accent-primary);
+}
+
+.config-form__input:disabled,
+.config-form__textarea:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.config-form__textarea {
+  resize: vertical;
+  font-family: 'Courier New', monospace;
+  min-height: 100px;
+}
+
+.config-form__hint {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  margin: 0;
+}
+
+.config-form__actions {
+  display: flex;
+  gap: var(--space-md);
+  justify-content: flex-end;
+  margin-top: var(--space-sm);
+}
+
+.config-form__button {
+  padding: var(--space-sm) var(--space-lg);
+  border-radius: var(--radius-md);
+  border: none;
+  font-size: 0.9rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.2s ease, opacity 0.2s ease;
+}
+
+.config-form__button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.config-form__button--primary {
+  background: var(--accent-primary);
+  color: white;
+}
+
+.config-form__button--primary:hover:not(:disabled) {
+  background: var(--accent-primary-strong);
+}
+
+.config-form__button--secondary {
+  background: var(--surface-control);
+  color: var(--text-primary);
+  border: 1px solid var(--border-stronger);
+}
+
+.config-form__button--secondary:hover:not(:disabled) {
+  background: var(--border-subtle);
+}
+
