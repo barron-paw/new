@@ -1,203 +1,231 @@
+import importlib.util
 import logging
+import sys
 import threading
-from collections import deque
-from datetime import datetime, timezone, timedelta
+from dataclasses import dataclass
+from datetime import datetime
+from pathlib import Path
 from typing import Dict, Iterable, Optional, Tuple
 
-import requests
-from hyperliquid_monitor.monitor import HyperliquidMonitor
-from hyperliquid_monitor.types import Trade
+try:
+    import schedule  # type: ignore
+except ImportError as exc:  # pragma: no cover - schedule is an optional dependency
+    raise RuntimeError(
+        "The 'schedule' package is required for monitoring. Install with `pip install schedule`."
+    ) from exc
 
 logger = logging.getLogger(__name__)
 
-RECENT_TRADES_LIMIT = 1000
+BASE_DIR = Path(__file__).resolve().parent
+MONITOR_POSITIONS_PATH = BASE_DIR / "monitor_positions.py"
+STATE_STORE_PATH = BASE_DIR / "state_store.py"
+STATE_ROOT = BASE_DIR / "state_store"
+STATE_ROOT.mkdir(exist_ok=True)
 
 
-def _format_trade_message(trade: Trade) -> str:
-    side = trade.side
-    if side == "SELL":
-        side = "BUY"
-    elif side == "BUY":
-        side = "SELL"
+class _SchedulerWrapper:
+    """Provide an isolated scheduler per monitor thread."""
 
-    trade_time = trade.timestamp
-    if trade_time.tzinfo is None:
-        trade_time = trade_time.replace(tzinfo=timezone.utc)
-    trade_time_utc8 = trade_time.astimezone(timezone(timedelta(hours=8)))
-    trade_time_str = trade_time_utc8.strftime("%Y-%m-%d %H:%M:%S UTC+8")
+    def __init__(self) -> None:
+        self._scheduler = schedule.Scheduler()
 
-    return (
-        "New trade detected:\n"
-        f"Address: {trade.address}\n"
-        f"Coin: {trade.coin}\n"
-        f"Side: {side}\n"
-        f"Size: {trade.size}\n"
-        f"Price: {trade.price}\n"
-        f"Type: {trade.trade_type}\n"
-        f"Tx Hash: {trade.tx_hash}\n"
-        f"Time: {trade_time_str}"
-    )
+    def every(self, *args, **kwargs):
+        return self._scheduler.every(*args, **kwargs)
+
+    def run_pending(self) -> None:
+        self._scheduler.run_pending()
 
 
-def _send_telegram_message(token: str, chat_id: str, text: str) -> bool:
-    url = f"https://api.telegram.org/bot{token}/sendMessage"
-    payload = {"chat_id": chat_id, "text": text}
-    try:
-        response = requests.post(url, data=payload, timeout=10)
-        response.raise_for_status()
-        return True
-    except requests.RequestException as exc:
-        logger.error("Failed to send Telegram message: %s", exc, exc_info=True)
-        return False
+@dataclass
+class _UserConfig:
+    user_id: int
+    telegram_bot_token: str
+    telegram_chat_id: str
+    wallet_addresses: Tuple[str, ...]
 
 
 class UserMonitor:
-    def __init__(
-        self,
-        *,
-        user_id: int,
-        telegram_bot_token: str,
-        telegram_chat_id: str,
-        wallet_addresses: Tuple[str, ...],
-    ) -> None:
-        self.user_id = user_id
-        self.telegram_bot_token = telegram_bot_token
-        self.telegram_chat_id = telegram_chat_id
-        self.wallet_addresses = wallet_addresses
-
-        self._monitor: Optional[HyperliquidMonitor] = None
+    def __init__(self, config: _UserConfig) -> None:
+        self.config = config
         self._thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
-        self._recent_keys: deque = deque(maxlen=RECENT_TRADES_LIMIT)
-        self._recent_set = set()
-        self._startup_timestamp = datetime.now(timezone.utc)
+        self._module = None
+        self._state_module = None
 
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
             return
-        if not self.wallet_addresses:
-            logger.warning("User %s has no wallet addresses; monitor not started", self.user_id)
+        if not self.config.wallet_addresses:
+            logger.warning("User %s has no wallet addresses; monitor not started", self.config.user_id)
             return
-        if not self.telegram_bot_token or not self.telegram_chat_id:
-            logger.warning("User %s missing Telegram credentials; monitor not started", self.user_id)
+        if not self.config.telegram_bot_token or not self.config.telegram_chat_id:
+            logger.warning("User %s missing Telegram credentials; monitor not started", self.config.user_id)
             return
 
         self._stop_event.clear()
-        self._thread = threading.Thread(target=self._run, name=f"user-monitor-{self.user_id}", daemon=True)
+        self._thread = threading.Thread(target=self._run, name=f"user-monitor-{self.config.user_id}", daemon=True)
         self._thread.start()
-        logger.info("Started monitor thread for user %s", self.user_id)
+        logger.info("Started monitor thread for user %s", self.config.user_id)
 
     def stop(self) -> None:
         self._stop_event.set()
-        if self._monitor is not None:
+        module = self._module
+        if module is not None:
             try:
-                self._monitor.stop()
-            except Exception as exc:  # pragma: no cover
-                logger.error("Error stopping monitor for user %s: %s", self.user_id, exc)
-        if self._thread and self._thread.is_alive():
-            self._thread.join(timeout=15)
-        self._monitor = None
+                module._stop_event.set()  # type: ignore[attr-defined]
+                module.stop_websocket_monitoring()
+            except Exception as exc:  # pragma: no cover - defensive stop
+                logger.debug("Error while stopping websocket monitoring for user %s: %s", self.config.user_id, exc)
+        if self._thread and self._thread.is_alive() and threading.current_thread() is not self._thread:
+            self._thread.join(timeout=30)
         self._thread = None
-        self._recent_keys.clear()
-        self._recent_set.clear()
-        logger.info("Stopped monitor for user %s", self.user_id)
+        self._module = None
+        self._state_module = None
+        logger.info("Stopped monitor for user %s", self.config.user_id)
 
-    def update(
-        self,
-        *,
-        telegram_bot_token: str,
-        telegram_chat_id: str,
-        wallet_addresses: Tuple[str, ...],
-    ) -> None:
+    def update(self, *, telegram_bot_token: str, telegram_chat_id: str, wallet_addresses: Tuple[str, ...]) -> None:
         restart_needed = (
-            telegram_bot_token != self.telegram_bot_token
-            or telegram_chat_id != self.telegram_chat_id
-            or wallet_addresses != self.wallet_addresses
+            telegram_bot_token != self.config.telegram_bot_token
+            or telegram_chat_id != self.config.telegram_chat_id
+            or wallet_addresses != self.config.wallet_addresses
         )
-        self.telegram_bot_token = telegram_bot_token
-        self.telegram_chat_id = telegram_chat_id
-        self.wallet_addresses = wallet_addresses
+        self.config = _UserConfig(
+            user_id=self.config.user_id,
+            telegram_bot_token=telegram_bot_token,
+            telegram_chat_id=telegram_chat_id,
+            wallet_addresses=wallet_addresses,
+        )
         if restart_needed:
             self.stop()
             self.start()
 
-    def _remember_trade(self, trade_key) -> bool:
-        if trade_key in self._recent_set:
-            return False
-        if len(self._recent_keys) >= RECENT_TRADES_LIMIT:
-            oldest = self._recent_keys.popleft()
-            self._recent_set.discard(oldest)
-        self._recent_keys.append(trade_key)
-        self._recent_set.add(trade_key)
-        return True
+    # Internal helpers -----------------------------------------------------
 
-    def _handle_trade(self, trade: Trade) -> None:
-        trade_time = trade.timestamp
-        if trade_time.tzinfo is None:
-            trade_time = trade_time.replace(tzinfo=timezone.utc)
-        if trade_time < self._startup_timestamp:
-            return
+    def _load_state_store_module(self, module_name: str):
+        spec = importlib.util.spec_from_file_location(module_name, STATE_STORE_PATH)
+        module = importlib.util.module_from_spec(spec)
+        if spec.loader is None:
+            raise RuntimeError("Failed to load state_store module")
+        spec.loader.exec_module(module)
+        return module
 
-        trade_key = (trade.tx_hash, trade.size, trade.price)
-        if not self._remember_trade(trade_key):
-            return
+    def _load_monitor_module(self, module_name: str):
+        spec = importlib.util.spec_from_file_location(module_name, MONITOR_POSITIONS_PATH)
+        module = importlib.util.module_from_spec(spec)
+        if spec.loader is None:
+            raise RuntimeError("Failed to load monitor_positions module")
+        spec.loader.exec_module(module)
+        return module
 
-        message = _format_trade_message(trade)
-        if not _send_telegram_message(self.telegram_bot_token, self.telegram_chat_id, message):
-            logger.warning("Telegram notification failed for user %s trade %s", self.user_id, trade.tx_hash)
+    def _prepare_modules(self) -> None:
+        user_id = self.config.user_id
+        state_module_name = f"backend.state_store_user_{user_id}"
+        monitor_module_name = f"backend.monitor_positions_user_{user_id}"
+
+        original_state_store = sys.modules.get("backend.state_store")
+
+        state_module = self._load_state_store_module(state_module_name)
+        sys.modules["backend.state_store"] = state_module
+        monitor_module = self._load_monitor_module(monitor_module_name)
+
+        # Restore original shared module for the rest of the app
+        if original_state_store is not None:
+            sys.modules["backend.state_store"] = original_state_store
+        else:
+            sys.modules.pop("backend.state_store", None)
+
+        self._state_module = state_module
+        self._module = monitor_module
+
+        # Configure state storage file per user
+        state_file = STATE_ROOT / f"user_{user_id}_position_state.json"
+        setattr(state_module, "_STATE_FILE", state_file)
+        if hasattr(state_module, "_REDIS_URL"):
+            state_module._REDIS_URL = None  # type: ignore[attr-defined]
+            state_module._REDIS_CLIENT = None  # type: ignore[attr-defined]
+
+    def _configure_module(self) -> None:
+        module = self._module
+        state_module = self._state_module
+        assert module is not None and state_module is not None
+
+        module.TELEGRAM_BOT_TOKEN = self.config.telegram_bot_token  # type: ignore[attr-defined]
+        module.TELEGRAM_CHAT_ID = self.config.telegram_chat_id  # type: ignore[attr-defined]
+        module.CONFIGURED_ADDRESSES = self.config.wallet_addresses  # type: ignore[attr-defined]
+        module._stop_event = threading.Event()  # type: ignore[attr-defined]
+        module._snapshot_initialized = False  # type: ignore[attr-defined]
+        module.schedule = _SchedulerWrapper()  # type: ignore[attr-defined]
+
+        # Refresh state store configuration to pick custom path/env
+        try:
+            state_module.refresh_state_store_configuration()
+        except Exception as exc:
+            logger.debug("State store refresh failed for user %s: %s", self.config.user_id, exc)
+
+    def _start_monitoring(self) -> None:
+        module = self._module
+        assert module is not None
+
+        try:
+            module.monitor_all_wallets()
+        except Exception as exc:
+            logger.warning("Initial monitor_all_wallets failed for user %s: %s", self.config.user_id, exc)
+
+        try:
+            module.send_wallet_snapshot(self.config.wallet_addresses)
+        except Exception as exc:
+            logger.warning("Initial snapshot failed for user %s: %s", self.config.user_id, exc)
+
+        websocket_thread = threading.Thread(
+            target=module.start_websocket_monitoring,
+            name=f"user-monitor-ws-{self.config.user_id}",
+            daemon=True,
+        )
+        websocket_thread.start()
+
+        # Schedule snapshot every 4 hours
+        try:
+            module.schedule.every(4).hours.do(  # type: ignore[attr-defined]
+                lambda: module.send_wallet_snapshot(self.config.wallet_addresses)
+            )
+        except Exception as exc:
+            logger.error("Failed to schedule snapshot for user %s: %s", self.config.user_id, exc)
+
+    def _scheduler_loop(self) -> None:
+        module = self._module
+        assert module is not None
+        while not self._stop_event.is_set():
+            try:
+                module.schedule.run_pending()  # type: ignore[attr-defined]
+            except Exception as exc:
+                logger.error("Scheduler loop error for user %s: %s", self.config.user_id, exc)
+            self._stop_event.wait(60)
 
     def _run(self) -> None:
-        self._startup_timestamp = datetime.now(timezone.utc)
+        start_time = datetime.utcnow()
         try:
-            monitor = HyperliquidMonitor(
-                addresses=self.wallet_addresses,
-                callback=self._handle_trade,
-                db_path=None,
-            )
-        except Exception as exc:  # pragma: no cover
-            logger.error("Failed to initialise monitor for user %s: %s", self.user_id, exc)
-            return
-
-        self._monitor = monitor
-        original_signal_handler = None
-        try:
-            import signal
-        except Exception:  # pragma: no cover - extremely defensive
-            signal = None  # type: ignore
-
-        try:
-            if signal is not None:
-                original_signal_handler = signal.signal
-
-                def _ignore_signal(sig, handler):
-                    logger.debug(
-                        "Ignoring signal registration %s for user %s", sig, self.user_id
-                    )
-                    return None
-
-                try:
-                    signal.signal = _ignore_signal  # type: ignore[assignment]
-                except Exception:  # pragma: no cover - best effort
-                    original_signal_handler = None
-
-            try:
-                monitor.start(handle_signals=False)  # type: ignore[call-arg]
-            except TypeError:
-                monitor.start()
-        except Exception as exc:  # pragma: no cover
-            logger.error("Monitor loop crashed for user %s: %s", self.user_id, exc)
+            self._prepare_modules()
+            self._configure_module()
+            self._start_monitoring()
+            self._scheduler_loop()
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.error("Monitor loop crashed for user %s: %s", self.config.user_id, exc)
         finally:
-            if signal is not None and original_signal_handler is not None:
+            self._stop_event.set()
+            module = self._module
+            if module is not None:
                 try:
-                    signal.signal = original_signal_handler  # type: ignore[assignment]
-                except Exception:  # pragma: no cover
-                    logger.debug("Failed to restore original signal handler")
-            try:
-                monitor.stop()
-            except Exception:
-                pass
-            self._monitor = None
-            logger.info("Monitor thread exited for user %s", self.user_id)
+                    module._stop_event.set()  # type: ignore[attr-defined]
+                    module.stop_websocket_monitoring()
+                except Exception:
+                    pass
+            self._module = None
+            self._state_module = None
+            logger.info(
+                "Monitor thread exited for user %s after %s seconds",
+                self.config.user_id,
+                (datetime.utcnow() - start_time).total_seconds(),
+            )
 
 
 class MonitorRegistry:
@@ -235,10 +263,12 @@ class MonitorRegistry:
                 return
 
             monitor = UserMonitor(
-                user_id=user_id,
-                telegram_bot_token=token,
-                telegram_chat_id=chat_id,
-                wallet_addresses=wallets_tuple,
+                _UserConfig(
+                    user_id=user_id,
+                    telegram_bot_token=token,
+                    telegram_chat_id=chat_id,
+                    wallet_addresses=wallets_tuple,
+                )
             )
             self._monitors[user_id] = monitor
             monitor.start()

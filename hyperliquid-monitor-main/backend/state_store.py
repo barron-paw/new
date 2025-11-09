@@ -1,4 +1,4 @@
-"""State storage helpers for sharing monitoring data across environments."""
+"""State storage helpers with optional Redis backing."""
 from __future__ import annotations
 
 import json
@@ -34,7 +34,7 @@ def _get_redis_client(url: Optional[str]):
         # Upstash and most hosted Redis providers offer TLS URLs.
         return redis.from_url(url, decode_responses=True)
     except Exception as exc:  # pragma: no cover - connection issues at import time
-        logger.warning("Failed to initialise Redis client: %%s", exc)
+        logger.warning("Failed to initialise Redis client: %s", exc)
         return None
 
 
@@ -71,10 +71,14 @@ def _mark_redis_healthy() -> None:
 
 
 def _configure_from_env() -> None:
-    global _REDIS_URL, _REDIS_KEY, _REDIS_CLIENT, _REDIS_ALERT_FIRED
+    global _REDIS_URL, _REDIS_KEY, _REDIS_CLIENT, _REDIS_ALERT_FIRED, _STATE_FILE
 
     env_url = os.getenv("STATE_REDIS_URL") or os.getenv("REDIS_URL") or os.getenv("UPSTASH_REDIS_URL")
     env_key = os.getenv("STATE_REDIS_KEY", "hyperliquid:position_state")
+    env_file = os.getenv("STATE_FILE_PATH")
+
+    if env_file:
+        _STATE_FILE = Path(env_file)
 
     url_changed = env_url != _REDIS_URL
 
@@ -146,7 +150,9 @@ def save_state_snapshot(state: Dict[str, Any]) -> None:
 
     with _STATE_LOCK:
         try:
+            _STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
             with _STATE_FILE.open("w") as handle:
                 handle.write(serialized)
         except OSError as exc:
             logger.error("Failed to write state file: %s", exc)
+
