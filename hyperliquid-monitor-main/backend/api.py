@@ -43,6 +43,11 @@ from .monitor_positions import (
     get_trade_history,
     load_position_state,
 )
+from .monitor_service import (
+    configure_user_monitor,
+    initialise_monitors_from_db,
+    shutdown_monitors,
+)
 
 
 JWT_SECRET = os.getenv("JWT_SECRET", "hyperliquid-monitor-secret")
@@ -398,6 +403,12 @@ app.add_middleware(
 @app.on_event("startup")
 def startup_event() -> None:
     _start_scheduler()
+    initialise_monitors_from_db()
+
+
+@app.on_event("shutdown")
+def shutdown_event() -> None:
+    shutdown_monitors()
 
 
 @app.get("/api/health")
@@ -539,6 +550,12 @@ def update_monitor_config(
         (payload.telegram_bot_token or "").strip() or None,
         (payload.telegram_chat_id or "").strip() or None,
         wallets,
+    )
+    configure_user_monitor(
+        current_user["id"],
+        telegram_bot_token=record.get("telegram_bot_token"),
+        telegram_chat_id=record.get("telegram_chat_id"),
+        wallet_addresses=record.get("wallet_addresses", []),
     )
     return MonitorConfig(
         telegram_bot_token=record.get("telegram_bot_token"),
