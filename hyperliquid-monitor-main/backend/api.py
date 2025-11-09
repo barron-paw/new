@@ -1,25 +1,40 @@
 """REST API surface for Hyperliquid monitoring data."""
 from __future__ import annotations
 
+import logging
 import os
+import smtplib
+import threading
 import time
-from pathlib import Path
+from datetime import datetime, timedelta, timezone
+from decimal import Decimal
+from email.message import EmailMessage
 from typing import Any, Dict, List, Optional
 
-from fastapi import FastAPI, HTTPException, Query
+import bcrypt
+import jwt
+import requests
+import schedule
+from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from pydantic import BaseModel, EmailStr, Field
 
+from .database import (
+    create_user,
+    get_user_by_email,
+    get_user_by_id,
+    get_user_config,
+    list_users,
+    update_user,
+    upsert_user_config,
+)
 from .monitor_positions import (
     CONFIGURED_ADDRESSES,
-    TELEGRAM_BOT_TOKEN,
-    TELEGRAM_CHAT_ID,
     _calculate_entry_price,
     _calculate_leverage,
     _extract_account_value,
     _extract_tx_hash,
-    _get_env_var,
-    _parse_wallet_addresses,
     _safe_float,
     _safe_int,
     calculate_position_metrics,
@@ -28,6 +43,101 @@ from .monitor_positions import (
     get_trade_history,
     load_position_state,
 )
+
+
+JWT_SECRET = os.getenv("JWT_SECRET", "hyperliquid-monitor-secret")
+JWT_ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
+JWT_EXPIRES_MINUTES = int(os.getenv("JWT_EXPIRES_MINUTES", "43200"))
+TRIAL_DAYS = int(os.getenv("TRIAL_DAYS", "3"))
+
+BSCSCAN_API_KEY = os.getenv("BSCSCAN_API_KEY", "")
+BSCSCAN_BASE_URL = os.getenv("BSCSCAN_BASE_URL", "https://api.bscscan.com/api")
+USDT_CONTRACT = os.getenv("USDT_CONTRACT", "0x55d398326f99059ff775485246999027b3197955").lower()
+USDT_DECIMALS = int(os.getenv("USDT_DECIMALS", "18"))
+PAYMENT_TARGET_ADDRESS = os.getenv("PAYMENT_TARGET_ADDRESS", "0xa0191ab9cad3dae4ce390d633c6c467da0ca975d").lower()
+SUBSCRIPTION_PRICE_USDT = Decimal(os.getenv("SUBSCRIPTION_PRICE_USDT", "7.9"))
+SUBSCRIPTION_DURATION_DAYS = int(os.getenv("SUBSCRIPTION_DURATION_DAYS", "30"))
+REMINDER_LEAD_DAYS = int(os.getenv("SUBSCRIPTION_REMINDER_DAYS", "1"))
+REMINDER_TIME = os.getenv("SUBSCRIPTION_REMINDER_TIME", "09:00")
+
+SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com")
+SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
+SMTP_USERNAME = os.getenv("SMTP_USERNAME", "")
+SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
+SMTP_FROM = os.getenv("SMTP_FROM", SMTP_USERNAME or "")
+EMAIL_ENABLED = bool(SMTP_USERNAME and SMTP_PASSWORD)
+
+TOKEN_MULTIPLIER = Decimal(10) ** USDT_DECIMALS
+REQUIRED_AMOUNT_WEI = int((SUBSCRIPTION_PRICE_USDT * TOKEN_MULTIPLIER).to_integral_value())
+
+security = HTTPBearer(auto_error=False)
+logger = logging.getLogger(__name__)
+_scheduler_started = False
+
+
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _create_access_token(user_id: int, email: str) -> str:
+    payload = {
+        "sub": str(user_id),
+        "email": email,
+        "exp": _now() + timedelta(minutes=JWT_EXPIRES_MINUTES),
+    }
+    return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+
+
+def _parse_iso(value: Optional[str]) -> Optional[datetime]:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError:
+        return None
+
+
+def _serialize_user(record: Dict[str, Any]) -> Dict[str, Any]:
+    trial_end = _parse_iso(record.get("trial_end"))
+    subscription_end = _parse_iso(record.get("subscription_end"))
+    now = _now()
+    trial_active = bool(trial_end and now <= trial_end)
+    subscription_active = bool(subscription_end and now <= subscription_end)
+    return {
+        "email": record["email"],
+        "trial_end": trial_end.isoformat() if trial_end else None,
+        "subscription_end": subscription_end.isoformat() if subscription_end else None,
+        "trial_active": trial_active,
+        "subscription_active": subscription_active,
+        "can_access_monitor": bool(trial_active or subscription_active),
+    }
+
+
+def _require_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)) -> Dict[str, Any]:
+    if credentials is None:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    token = credentials.credentials
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+    except jwt.ExpiredSignatureError as exc:
+        raise HTTPException(status_code=401, detail="Token expired") from exc
+    except jwt.PyJWTError as exc:  # pragma: no cover - generic decode error
+        raise HTTPException(status_code=401, detail="Invalid token") from exc
+
+    user_id = payload.get("sub")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Invalid token payload")
+    user = get_user_by_id(int(user_id))
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found")
+    return user
+
+
+def _ensure_monitor_access(user: Dict[str, Any]) -> Dict[str, Any]:
+    info = _serialize_user(user)
+    if info["can_access_monitor"]:
+        return info
+    raise HTTPException(status_code=402, detail="Subscription or trial required to access monitor configuration")
 
 
 class PositionPayload(BaseModel):
@@ -98,16 +208,39 @@ class WalletMetricsPayload(BaseModel):
         populate_by_name = True
 
 
-class ConfigPayload(BaseModel):
-    telegram_bot_token: Optional[str] = Field(default=None, alias="telegramBotToken")
-    telegram_chat_id: Optional[str] = Field(default=None, alias="telegramChatId")
-    wallet_addresses: Optional[List[str]] = Field(default=None, alias="walletAddresses")
-
-    class Config:
-        populate_by_name = True
+class RegisterRequest(BaseModel):
+    email: EmailStr
+    password: str
 
 
-class ConfigResponsePayload(BaseModel):
+class LoginRequest(BaseModel):
+    email: EmailStr
+    password: str
+
+
+class AuthToken(BaseModel):
+    token: str
+
+
+class UserInfo(BaseModel):
+    email: EmailStr
+    trial_end: Optional[str]
+    subscription_end: Optional[str]
+    trial_active: bool
+    subscription_active: bool
+    can_access_monitor: bool
+
+
+class AuthResponse(BaseModel):
+    token: str
+    user: UserInfo
+
+
+class PaymentVerificationRequest(BaseModel):
+    tx_hash: str = Field(..., alias="txHash")
+
+
+class MonitorConfig(BaseModel):
     telegram_bot_token: Optional[str] = Field(None, alias="telegramBotToken")
     telegram_chat_id: Optional[str] = Field(None, alias="telegramChatId")
     wallet_addresses: List[str] = Field(default_factory=list, alias="walletAddresses")
@@ -245,61 +378,6 @@ def _list_known_wallets() -> List[str]:
     return merged
 
 
-def _get_env_file_path() -> Path:
-    """Get the path to the .env file."""
-    return Path(__file__).resolve().parent / ".env"
-
-
-def _read_env_file() -> Dict[str, str]:
-    """Read the .env file and return a dictionary of key-value pairs."""
-    env_file = _get_env_file_path()
-    env_vars: Dict[str, str] = {}
-    if env_file.exists():
-        with env_file.open() as f:
-            for line in f:
-                stripped = line.strip()
-                if not stripped or stripped.startswith("#"):
-                    continue
-                if "=" not in stripped:
-                    continue
-                key, value = stripped.split("=", 1)
-                key = key.strip()
-                value = value.strip()
-                # Remove quotes if present
-                if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
-                    value = value[1:-1]
-                env_vars[key] = value
-    return env_vars
-
-
-def _write_env_file(env_vars: Dict[str, str]) -> None:
-    """Write environment variables to the .env file."""
-    env_file = _get_env_file_path()
-    existing_vars = _read_env_file()
-    existing_vars.update(env_vars)
-    
-    # Remove None values
-    existing_vars = {k: v for k, v in existing_vars.items() if v is not None and v != ""}
-    
-    with env_file.open("w") as f:
-        for key, value in sorted(existing_vars.items()):
-            value_str = str(value)
-            # Check if value needs quotes (contains spaces, special chars, or is a JSON array)
-            needs_quotes = " " in value_str or "#" in value_str or (value_str.startswith("[") and value_str.endswith("]"))
-            if not needs_quotes:
-                f.write(f"{key}={value_str}\n")
-            else:
-                # For JSON arrays or values with spaces, use double quotes
-                f.write(f'{key}="{value_str}"\n')
-    
-    # Update environment variables in current process
-    for key, value in env_vars.items():
-        if value is not None and value != "":
-            os.environ[key] = str(value)
-        elif key in os.environ:
-            del os.environ[key]
-
-
 app = FastAPI(title="Hyperliquid Monitor API", version="0.1.0")
 
 allowed_origins = [
@@ -317,36 +395,43 @@ app.add_middleware(
 )
 
 
+@app.on_event("startup")
+def startup_event() -> None:
+    _start_scheduler()
+
+
 @app.get("/api/health")
 def healthcheck() -> Dict[str, Any]:
     return {"status": "ok", "timestamp": int(time.time() * 1000)}
 
 
 @app.get("/api/wallets", response_model=WalletListPayload)
+@app.get("/wallets", response_model=WalletListPayload)
 def list_wallets() -> WalletListPayload:
     wallets = _list_known_wallets()
     return WalletListPayload(wallets=wallets, count=len(wallets))
 
 
 @app.get("/api/wallets/{address}", response_model=WalletSummaryPayload)
+@app.get("/wallets/{address}", response_model=WalletSummaryPayload)
 def wallet_summary(address: str) -> WalletSummaryPayload:
-    wallets = _list_known_wallets()
-    if wallets and address not in wallets:
-        raise HTTPException(status_code=404, detail=f"Wallet {address} is not tracked")
     return _compose_wallet_summary(address)
 
 
 @app.get("/api/wallets/{address}/positions", response_model=WalletSummaryPayload)
+@app.get("/wallets/{address}/positions", response_model=WalletSummaryPayload)
 def wallet_positions(address: str) -> WalletSummaryPayload:
     return wallet_summary(address)
 
 
 @app.get("/api/wallets/{address}/fills", response_model=FillListPayload)
+@app.get("/wallets/{address}/fills", response_model=FillListPayload)
 def wallet_fills(address: str, limit: int = Query(50, ge=1, le=200)) -> FillListPayload:
     return _compose_fills(address, limit)
 
 
 @app.get("/api/wallets/{address}/metrics", response_model=WalletMetricsPayload)
+@app.get("/wallets/{address}/metrics", response_model=WalletMetricsPayload)
 def wallet_metrics(address: str) -> WalletMetricsPayload:
     summary = wallet_summary(address)
     try:
@@ -368,69 +453,199 @@ def wallet_metrics(address: str) -> WalletMetricsPayload:
     )
 
 
-@app.get("/api/config", response_model=ConfigResponsePayload)
-def get_config() -> ConfigResponsePayload:
-    """Get current configuration."""
-    token = _get_env_var("TELEGRAM_BOT_TOKEN") or TELEGRAM_BOT_TOKEN
-    chat_id = _get_env_var("TELEGRAM_CHAT_ID") or TELEGRAM_CHAT_ID
-    wallets_str = _get_env_var("WALLET_ADDRESSES") or ""
-    wallets = _parse_wallet_addresses(wallets_str) if wallets_str else list(CONFIGURED_ADDRESSES)
-    
-    return ConfigResponsePayload(
-        telegramBotToken=token,
-        telegramChatId=chat_id,
-        walletAddresses=wallets,
+@app.post("/api/auth/register", response_model=AuthResponse)
+def register(payload: RegisterRequest) -> AuthResponse:
+    email = payload.email.lower()
+    if len(payload.password) < 6:
+        raise HTTPException(status_code=400, detail="Password must be at least 6 characters long")
+    if get_user_by_email(email):
+        raise HTTPException(status_code=409, detail="Email already registered")
+
+    password_hash = bcrypt.hashpw(payload.password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+    user_record = create_user(email, password_hash, TRIAL_DAYS)
+    token = _create_access_token(user_record["id"], user_record["email"])
+    return AuthResponse(token=token, user=UserInfo(**_serialize_user(user_record)))
+
+
+@app.post("/api/auth/login", response_model=AuthResponse)
+def login(payload: LoginRequest) -> AuthResponse:
+    user_record = get_user_by_email(payload.email.lower())
+    if not user_record or not bcrypt.checkpw(payload.password.encode("utf-8"), user_record["password_hash"].encode("utf-8")):
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+    token = _create_access_token(user_record["id"], user_record["email"])
+    return AuthResponse(token=token, user=UserInfo(**_serialize_user(user_record)))
+
+
+@app.get("/api/auth/me", response_model=UserInfo)
+def me(current_user: Dict[str, Any] = Depends(_require_current_user)) -> UserInfo:
+    return UserInfo(**_serialize_user(current_user))
+
+
+@app.post("/api/subscription/verify", response_model=UserInfo)
+def verify_subscription(
+    payload: PaymentVerificationRequest,
+    current_user: Dict[str, Any] = Depends(_require_current_user),
+) -> UserInfo:
+    tx_hash = payload.tx_hash.lower()
+    if current_user.get("last_payment_hash") == tx_hash:
+        return UserInfo(**_serialize_user(current_user))
+
+    payment_data = _verify_payment_on_chain(tx_hash)
+    logger.info("Validated subscription payment from %s for tx %s", payment_data.get("from_address"), tx_hash)
+    now = _now()
+    subscription_end = _parse_iso(current_user.get("subscription_end"))
+    if subscription_end and subscription_end > now:
+        new_end = subscription_end + timedelta(days=SUBSCRIPTION_DURATION_DAYS)
+    else:
+        new_end = now + timedelta(days=SUBSCRIPTION_DURATION_DAYS)
+
+    update_user(
+        current_user["id"],
+        subscription_end=new_end.isoformat(),
+        last_payment_hash=tx_hash,
+        last_reminder_at=None,
+    )
+    refreshed = get_user_by_id(current_user["id"])
+    if refreshed and EMAIL_ENABLED:
+        body = (
+            "您的 Hyperliquid Monitor 订阅支付已确认。\n\n"
+            f"交易哈希：{tx_hash}\n有效期至：{new_end.isoformat()}。感谢您的支持！"
+        )
+        _send_email(refreshed["email"], "Hyperliquid Monitor 订阅已激活", body)
+
+    return UserInfo(**_serialize_user(refreshed or current_user))
+
+
+@app.get("/api/config", response_model=MonitorConfig)
+def get_monitor_config(current_user: Dict[str, Any] = Depends(_require_current_user)) -> MonitorConfig:
+    _ensure_monitor_access(current_user)
+    stored = get_user_config(current_user["id"])
+    return MonitorConfig(
+        telegram_bot_token=stored.get("telegram_bot_token"),
+        telegram_chat_id=stored.get("telegram_chat_id"),
+        wallet_addresses=stored.get("wallet_addresses", []),
     )
 
 
-@app.post("/api/config", response_model=ConfigResponsePayload)
-def update_config(config: ConfigPayload) -> ConfigResponsePayload:
-    """Update configuration."""
-    import json
-    env_updates: Dict[str, Optional[str]] = {}
-    
-    if config.telegram_bot_token is not None:
-        token_value = config.telegram_bot_token.strip() if isinstance(config.telegram_bot_token, str) else config.telegram_bot_token
-        env_updates["TELEGRAM_BOT_TOKEN"] = token_value if token_value else None
-    if config.telegram_chat_id is not None:
-        chat_id_value = config.telegram_chat_id.strip() if isinstance(config.telegram_chat_id, str) else config.telegram_chat_id
-        env_updates["TELEGRAM_CHAT_ID"] = chat_id_value if chat_id_value else None
-    if config.wallet_addresses is not None:
-        # Format wallet addresses as a JSON list string for .env file
-        if config.wallet_addresses:
-            wallets_str = json.dumps(config.wallet_addresses)
-            env_updates["WALLET_ADDRESSES"] = wallets_str
-        else:
-            # Empty list means clear the configuration
-            env_updates["WALLET_ADDRESSES"] = "[]"
-    
-    if env_updates:
-        try:
-            # Filter out None values for writing
-            env_updates_to_write = {k: v for k, v in env_updates.items() if v is not None}
-            if env_updates_to_write:
-                _write_env_file(env_updates_to_write)
-            # Handle deletion of None values
-            existing_vars = _read_env_file()
-            for key in env_updates:
-                if env_updates[key] is None and key in existing_vars:
-                    existing_vars.pop(key)
-                    if key in os.environ:
-                        del os.environ[key]
-            # Write back the file if we removed something
-            if any(env_updates.get(k) is None for k in env_updates):
-                _write_env_file(existing_vars)
-        except Exception as exc:
-            raise HTTPException(status_code=500, detail=f"Failed to update configuration: {str(exc)}")
-    
-    # Return updated config
-    token = env_updates.get("TELEGRAM_BOT_TOKEN") or _get_env_var("TELEGRAM_BOT_TOKEN") or TELEGRAM_BOT_TOKEN
-    chat_id = env_updates.get("TELEGRAM_CHAT_ID") or _get_env_var("TELEGRAM_CHAT_ID") or TELEGRAM_CHAT_ID
-    wallets_str = env_updates.get("WALLET_ADDRESSES") or _get_env_var("WALLET_ADDRESSES") or ""
-    wallets = _parse_wallet_addresses(wallets_str) if wallets_str else list(CONFIGURED_ADDRESSES)
-    
-    return ConfigResponsePayload(
-        telegramBotToken=token,
-        telegramChatId=chat_id,
-        walletAddresses=wallets,
+@app.post("/api/config", response_model=MonitorConfig)
+def update_monitor_config(
+    payload: MonitorConfig,
+    current_user: Dict[str, Any] = Depends(_require_current_user),
+) -> MonitorConfig:
+    _ensure_monitor_access(current_user)
+    wallets = [addr.strip() for addr in payload.wallet_addresses if addr.strip()]
+    record = upsert_user_config(
+        current_user["id"],
+        (payload.telegram_bot_token or "").strip() or None,
+        (payload.telegram_chat_id or "").strip() or None,
+        wallets,
     )
+    return MonitorConfig(
+        telegram_bot_token=record.get("telegram_bot_token"),
+        telegram_chat_id=record.get("telegram_chat_id"),
+        wallet_addresses=record.get("wallet_addresses", []),
+    )
+
+
+def _topic_to_address(topic: str) -> str:
+    if topic.startswith("0x") and len(topic) == 66:
+        return "0x" + topic[-40:]
+    return topic
+
+
+def _send_email(recipient: str, subject: str, body: str) -> None:
+    if not EMAIL_ENABLED or not recipient:
+        return
+    message = EmailMessage()
+    message["Subject"] = subject
+    message["From"] = SMTP_FROM or SMTP_USERNAME
+    message["To"] = recipient
+    message.set_content(body)
+    try:
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=30) as server:
+            server.starttls()
+            server.login(SMTP_USERNAME, SMTP_PASSWORD)
+            server.send_message(message)
+    except Exception as exc:  # pragma: no cover - email failures are non-critical
+        logger.warning("Failed to send email to %s: %s", recipient, exc)
+
+
+def _verify_payment_on_chain(tx_hash: str) -> Dict[str, Any]:
+    if not BSCSCAN_API_KEY:
+        raise HTTPException(status_code=500, detail="BscScan API key not configured")
+    params = {
+        "module": "proxy",
+        "action": "eth_getTransactionReceipt",
+        "txhash": tx_hash,
+        "apikey": BSCSCAN_API_KEY,
+    }
+    response = requests.get(BSCSCAN_BASE_URL, params=params, timeout=30)
+    response.raise_for_status()
+    payload = response.json()
+    result = payload.get("result")
+    if not result:
+        raise HTTPException(status_code=400, detail="Transaction not found or pending confirmation")
+    if result.get("status") == "0x0":
+        raise HTTPException(status_code=400, detail="Transaction failed on chain")
+
+    contract = USDT_CONTRACT.lower()
+    target = PAYMENT_TARGET_ADDRESS.lower()
+    logs = result.get("logs", [])
+    for entry in logs:
+        if entry.get("address", "").lower() != contract:
+            continue
+        topics = entry.get("topics") or []
+        if len(topics) < 3:
+            continue
+        to_address = _topic_to_address(topics[2]).lower()
+        if to_address != target:
+            continue
+        amount_raw = int(entry.get("data", "0x0"), 16)
+        if amount_raw < REQUIRED_AMOUNT_WEI:
+            continue
+        from_address = _topic_to_address(topics[1]).lower()
+        block_number = int(result.get("blockNumber", "0x0"), 16)
+        return {
+            "from_address": from_address,
+            "amount_raw": amount_raw,
+            "block_number": block_number,
+        }
+    raise HTTPException(status_code=400, detail="No qualifying USDT transfer to the monitored address was found in the transaction")
+
+
+def _check_subscription_reminders() -> None:
+    now = _now()
+    upcoming_threshold = now + timedelta(days=REMINDER_LEAD_DAYS)
+    for user in list_users():
+        subscription_end = _parse_iso(user.get("subscription_end"))
+        if not subscription_end or subscription_end <= now or subscription_end > upcoming_threshold:
+            continue
+        last_reminder = _parse_iso(user.get("last_reminder_at"))
+        if last_reminder and (now - last_reminder) < timedelta(days=1):
+            continue
+        if EMAIL_ENABLED:
+            body = (
+                "您的 Hyperliquid Monitor 订阅将于 "
+                f"{subscription_end.isoformat()} 到期，请及时续费以继续使用监控配置功能。"
+            )
+            _send_email(user["email"], "Hyperliquid Monitor 订阅即将到期", body)
+        update_user(user["id"], last_reminder_at=now.isoformat())
+
+
+def _start_scheduler() -> None:
+    global _scheduler_started
+    if _scheduler_started or REMINDER_LEAD_DAYS <= 0:
+        return
+    _scheduler_started = True
+    try:
+        schedule.clear("subscription-reminders")
+    except Exception:  # pragma: no cover - scheduler exceptions are non-critical
+        pass
+    schedule.every().day.at(REMINDER_TIME).do(_check_subscription_reminders).tag("subscription-reminders")
+
+    def runner() -> None:
+        while True:
+            schedule.run_pending()
+            time.sleep(60)
+
+    threading.Thread(target=runner, daemon=True).start()

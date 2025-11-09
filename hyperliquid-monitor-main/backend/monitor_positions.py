@@ -1,5 +1,6 @@
 from ast import literal_eval
 import hashlib
+import json
 import logging
 import os
 import signal
@@ -14,22 +15,6 @@ import requests
 import schedule
 from hyperliquid.info import Info
 from hyperliquid.utils.error import ClientError, ServerError
-
-try:
-    from backend.state_store import (
-        load_state_snapshot,
-        refresh_state_store_configuration,
-        register_state_store_alert_handler,
-        save_state_snapshot,
-    )
-except ImportError:  # pragma: no cover - fallback when executed as a script
-    sys.path.append(str(Path(__file__).resolve().parent.parent))
-    from backend.state_store import (
-        load_state_snapshot,
-        refresh_state_store_configuration,
-        register_state_store_alert_handler,
-        save_state_snapshot,
-    )
 
 try:
     from dotenv import load_dotenv  # type: ignore
@@ -48,6 +33,7 @@ MESSAGE_DELAY_SECONDS = 0.75
 MAX_RETRIES = 3
 RETRY_DELAY = 2
 API_TIMEOUT = 30
+STATE_FILE = Path(__file__).resolve().parent / "position_state.json"
 STATE_POSITIONS_KEY = "positions"
 STATE_META_KEY = "meta"
 STATE_META_COINS_KEY = "coins"
@@ -110,7 +96,6 @@ def _parse_wallet_addresses(raw_value: str) -> List[str]:
 
 
 _load_env_file()
-refresh_state_store_configuration()
 
 TELEGRAM_BOT_TOKEN = _get_env_var("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = _get_env_var("TELEGRAM_CHAT_ID")
@@ -600,15 +585,19 @@ def format_position_message(
 
 def save_position_state(state: Dict[str, Dict[str, Any]]) -> None:
     try:
-        save_state_snapshot(state)
-    except Exception as exc:  # pragma: no cover - unexpected persistence failure
+        with STATE_FILE.open("w") as handle:
+            json.dump(state, handle)
+    except IOError as exc:
         logger.error("Error saving position state: %s", exc)
 
 
 def load_position_state() -> Dict[str, Dict[str, Any]]:
+    if not STATE_FILE.exists():
+        return {}
     try:
-        raw_state = load_state_snapshot()
-    except Exception as exc:  # pragma: no cover - unexpected persistence failure
+        with STATE_FILE.open() as handle:
+            raw_state = json.load(handle)
+    except (json.JSONDecodeError, IOError) as exc:
         logger.warning("Error loading position state: %s", exc)
         return {}
 
@@ -1017,34 +1006,6 @@ def send_telegram_message(message: str) -> bool:
     return False
 
 
-_STATE_STORE_ALERT_REGISTERED = False
-
-
-def _ensure_state_store_alerts() -> None:
-    global _STATE_STORE_ALERT_REGISTERED
-    if _STATE_STORE_ALERT_REGISTERED:
-        return
-
-    def _handle_state_store_alert(message: str) -> None:
-        logger.warning("State store alert: %s", message)
-        if TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID:
-            alert_text = f"⚠️ Redis state store issue\n{message}"
-            if send_telegram_message(alert_text):
-                logger.info("Dispatched Redis alert to Telegram")
-            else:
-                logger.error("Failed to dispatch Redis alert to Telegram")
-        else:
-            logger.error("Cannot dispatch Redis alert; Telegram credentials missing")
-
-    try:
-        register_state_store_alert_handler(_handle_state_store_alert)
-    except Exception as exc:  # pragma: no cover - defensive registration
-        logger.warning("Failed to register state store alert handler: %s", exc)
-        return
-
-    _STATE_STORE_ALERT_REGISTERED = True
-
-
 def _collect_wallet_updates(
     address: str,
     *,
@@ -1399,8 +1360,6 @@ def main() -> None:
     if not validate_config():
         logger.error("Configuration validation failed. Exiting.")
         return
-
-    _ensure_state_store_alerts()
 
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)

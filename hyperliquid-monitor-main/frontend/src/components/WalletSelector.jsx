@@ -1,9 +1,20 @@
-import { useState, useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import './WalletSelector.css';
 
 export function WalletSelector({ wallets, value, onChange, onRefresh }) {
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const containerRef = useRef(null);
+
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (containerRef.current && !containerRef.current.contains(event.target)) {
+        setIsDropdownOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   const handleInputChange = (event) => {
     onChange?.(event.target.value);
@@ -15,30 +26,17 @@ export function WalletSelector({ wallets, value, onChange, onRefresh }) {
   };
 
   const toggleDropdown = () => {
-    setIsDropdownOpen(!isDropdownOpen);
-  };
-
-  useEffect(() => {
-    const handleClickOutside = (event) => {
-      if (containerRef.current && !containerRef.current.contains(event.target)) {
-        setIsDropdownOpen(false);
-      }
-    };
-
-    if (isDropdownOpen) {
-      document.addEventListener('mousedown', handleClickOutside);
+    if (!wallets.length) {
+      return;
     }
-
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
-    };
-  }, [isDropdownOpen]);
+    setIsDropdownOpen((open) => !open);
+  };
 
   return (
     <div className="wallet-selector">
-      <div className="wallet-selector__input-wrapper">
+      <div className="wallet-selector__input-wrapper" ref={containerRef}>
         <label className="wallet-selector__label" htmlFor="wallet-input">Wallet</label>
-        <div className="wallet-selector__input-container" ref={containerRef}>
+        <div className="wallet-selector__input-container">
           <input
             id="wallet-input"
             type="text"
@@ -46,32 +44,34 @@ export function WalletSelector({ wallets, value, onChange, onRefresh }) {
             value={value}
             onChange={handleInputChange}
             placeholder="Enter wallet address"
+            spellCheck="false"
           />
-          {wallets.length > 0 && (
-            <button
-              type="button"
-              className={`wallet-selector__dropdown-button ${isDropdownOpen ? 'wallet-selector__dropdown-button--open' : ''}`}
-              onClick={toggleDropdown}
-              aria-label="Select wallet"
+
+          <button
+            type="button"
+            className={`wallet-selector__dropdown-button ${isDropdownOpen ? 'wallet-selector__dropdown-button--open' : ''}`}
+            onClick={toggleDropdown}
+            aria-label="Select wallet from list"
+            disabled={!wallets.length}
+          >
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 16 16"
+              fill="none"
+              xmlns="http://www.w3.org/2000/svg"
             >
-              <svg
-                width="16"
-                height="16"
-                viewBox="0 0 16 16"
-                fill="none"
-                xmlns="http://www.w3.org/2000/svg"
-              >
-                <path
-                  d="M4 6L8 10L12 6"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-            </button>
-          )}
-          {isDropdownOpen && wallets.length > 0 && (
+              <path
+                d="M4 6L8 10L12 6"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </button>
+
+          {isDropdownOpen ? (
             <div className="wallet-selector__dropdown">
               {wallets.map((wallet) => (
                 <button
@@ -84,9 +84,10 @@ export function WalletSelector({ wallets, value, onChange, onRefresh }) {
                 </button>
               ))}
             </div>
-          )}
+          ) : null}
         </div>
       </div>
+
       <button
         type="button"
         className="wallet-selector__refresh"

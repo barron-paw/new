@@ -12,6 +12,20 @@
   padding: var(--space-lg);
 }
 
+.layout__header-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-xl);
+  flex-wrap: wrap;
+}
+
+.layout__header-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+}
+
 .layout__main {
   padding: var(--space-xl);
   max-width: 1200px;

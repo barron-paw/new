@@ -2,6 +2,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: var(--space-xl);
 }
 
 .dashboard__header h1 {
@@ -10,5 +11,144 @@
 
 .dashboard__header p {
   margin: var(--space-xs) 0 0;
+  color: var(--text-muted);
+}
+
+.dashboard__section {
+  background: var(--surface-panel);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: var(--space-xl);
+  margin-bottom: var(--space-xl);
+  box-shadow: var(--shadow-sm);
+}
+
+.subscription-panel__content {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-lg);
+}
+
+.subscription-panel__status {
+  color: var(--success);
+  font-weight: 600;
+}
+
+.subscription-panel__list {
+  margin: var(--space-md) 0;
+  padding-left: var(--space-xl);
+  color: var(--text-muted);
+}
+
+.subscription-panel__form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+.subscription-panel__form input {
+  padding: var(--space-sm) var(--space-md);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-stronger);
+  background: var(--surface-control);
+  color: var(--text-primary);
+}
+
+.subscription-panel__form input:focus {
+  outline: none;
+  border-color: var(--accent-primary);
+}
+
+.subscription-panel__form button {
+  align-self: flex-start;
+  padding: var(--space-sm) var(--space-lg);
+  border-radius: var(--radius-md);
+  border: none;
+  background: var(--accent-primary);
+  color: white;
+  cursor: pointer;
+}
+
+.subscription-panel__form button:hover {
+  background: var(--accent-primary-strong);
+}
+
+.subscription-panel__message {
+  font-size: 0.9rem;
+  color: var(--text-muted);
+}
+
+.monitor-config__grid {
+  display: grid;
+  gap: var(--space-xl);
+}
+
+@media (min-width: 960px) {
+  .monitor-config__grid {
+    grid-template-columns: 1.1fr 0.9fr;
+  }
+}
+
+.monitor-config__form-wrapper h2 {
+  margin-top: 0;
+  margin-bottom: var(--space-md);
+}
+
+.monitor-config__helper {
+  background: var(--info-soft);
+  border: 1px solid var(--info-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-sm) var(--space-md);
+  color: var(--text-primary);
+  margin-bottom: var(--space-md);
+}
+
+.monitor-config__form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+.monitor-config__form input,
+.monitor-config__form textarea {
+  padding: var(--space-sm) var(--space-md);
+  border: 1px solid var(--border-stronger);
+  border-radius: var(--radius-md);
+  background: var(--surface-control);
+  color: var(--text-primary);
+}
+
+.monitor-config__form textarea {
+  min-height: 160px;
+  resize: vertical;
+}
+
+.monitor-config__form input:focus,
+.monitor-config__form textarea:focus {
+  outline: none;
+  border-color: var(--accent-primary);
+}
+
+.monitor-config__form button {
+  align-self: flex-start;
+  padding: var(--space-sm) var(--space-lg);
+  border-radius: var(--radius-md);
+  border: none;
+  background: var(--accent-primary);
+  color: white;
+  cursor: pointer;
+}
+
+.monitor-config__form button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.monitor-config__form button:not(:disabled):hover {
+  background: var(--accent-primary-strong);
+}
+
+.monitor-config__message {
+  font-size: 0.9rem;
   color: var(--text-muted);
 }

@@ -6,8 +6,10 @@ import PositionsTable from '../components/PositionsTable';
 import FillsList from '../components/FillsList';
 import StatusBanner from '../components/StatusBanner';
 import LoadingIndicator from '../components/LoadingIndicator';
-import ConfigForm from '../components/ConfigForm';
 import useWalletData from '../hooks/useWalletData';
+import AccountMenu from '../components/AccountMenu.jsx';
+import SubscriptionPanel from '../components/SubscriptionPanel.jsx';
+import MonitorConfigPanel from '../components/MonitorConfigPanel.jsx';
 
 export function Dashboard() {
   const {
@@ -20,13 +22,7 @@ export function Dashboard() {
     loading,
     error,
     refresh,
-    reloadWallets,
   } = useWalletData();
-
-  const handleConfigUpdate = () => {
-    // Reload wallets after configuration update
-    reloadWallets();
-  };
 
   const header = (
     <div className="dashboard__header">
@@ -44,8 +40,9 @@ export function Dashboard() {
   );
 
   return (
-    <Layout header={header} footer={footer}>
-      <ConfigForm onUpdate={handleConfigUpdate} />
+    <Layout header={header} actions={<AccountMenu />} footer={footer}>
+      <SubscriptionPanel />
+      <MonitorConfigPanel />
 
       <WalletSelector
         wallets={wallets}
