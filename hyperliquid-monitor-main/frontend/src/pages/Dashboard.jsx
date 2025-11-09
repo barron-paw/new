@@ -13,7 +13,6 @@ import MonitorConfigPanel from '../components/MonitorConfigPanel.jsx';
 
 export function Dashboard() {
   const {
-    wallets,
     selectedWallet,
     setSelectedWallet,
     summary,
@@ -45,10 +44,10 @@ export function Dashboard() {
       <MonitorConfigPanel />
 
       <WalletSelector
-        wallets={wallets}
         value={selectedWallet}
         onChange={setSelectedWallet}
         onRefresh={refresh}
+        isLoading={loading}
       />
 
       {error ? (

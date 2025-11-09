@@ -27,7 +27,6 @@
   flex: 1;
   min-width: 320px;
   padding: var(--space-sm) var(--space-md);
-  padding-right: 2.5rem;
   border-radius: var(--radius-md);
   border: 1px solid var(--border-stronger);
   background: var(--surface-control);
@@ -45,85 +44,6 @@
 .wallet-selector__input::placeholder {
   color: var(--text-muted);
   opacity: 0.6;
-}
-
-.wallet-selector__dropdown-button {
-  position: absolute;
-  right: var(--space-xs);
-  width: 2rem;
-  height: 2rem;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: none;
-  border-radius: var(--radius-md);
-  background: transparent;
-  color: var(--text-muted);
-  cursor: pointer;
-  transition: color 0.2s ease, background 0.2s ease;
-}
-
-.wallet-selector__dropdown-button:hover:not(:disabled) {
-  color: var(--text-primary);
-  background: rgba(255, 255, 255, 0.05);
-}
-
-.wallet-selector__dropdown-button:disabled {
-  cursor: not-allowed;
-  opacity: 0.5;
-}
-
-.wallet-selector__dropdown-button svg {
-  transition: transform 0.2s ease;
-}
-
-.wallet-selector__dropdown-button--open svg {
-  transform: rotate(180deg);
-}
-
-.wallet-selector__dropdown {
-  position: absolute;
-  top: calc(100% + var(--space-xs));
-  left: 0;
-  right: 0;
-  background: var(--surface-control);
-  border: 1px solid var(--border-stronger);
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow-sm);
-  max-height: 220px;
-  overflow-y: auto;
-  z-index: 1000;
-}
-
-.wallet-selector__dropdown::-webkit-scrollbar {
-  width: 6px;
-}
-
-.wallet-selector__dropdown::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.wallet-selector__dropdown::-webkit-scrollbar-thumb {
-  background: var(--border-stronger);
-  border-radius: 3px;
-}
-
-.wallet-selector__dropdown-item {
-  width: 100%;
-  padding: var(--space-sm) var(--space-md);
-  background: transparent;
-  border: none;
-  color: var(--text-primary);
-  text-align: left;
-  font-family: 'Courier New', monospace;
-  font-size: 0.9rem;
-  cursor: pointer;
-  transition: background 0.2s ease;
-  word-break: break-all;
-}
-
-.wallet-selector__dropdown-item:hover {
-  background: var(--surface-panel);
 }
 
 .wallet-selector__refresh {

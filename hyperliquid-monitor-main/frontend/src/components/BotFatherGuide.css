@@ -19,11 +19,37 @@
 }
 
 .botfather-guide__illustration {
-  border: 1px dashed var(--border-stronger);
+  display: grid;
+  gap: var(--space-lg);
   border-radius: var(--radius-md);
-  padding: var(--space-lg);
-  text-align: center;
-  font-size: 0.85rem;
-  color: var(--text-muted);
   background: rgba(91, 124, 250, 0.08);
+  padding: var(--space-lg);
+}
+
+.botfather-guide__illustration figure {
+  margin: 0;
+  border: 1px solid var(--border-stronger);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  background: var(--surface-elevation);
+  box-shadow: var(--shadow-sm);
+}
+
+.botfather-guide__illustration img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.botfather-guide__illustration figcaption {
+  padding: var(--space-sm) var(--space-md);
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  background: var(--surface-panel);
+}
+
+@media (min-width: 768px) {
+  .botfather-guide__illustration {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }

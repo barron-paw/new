@@ -1,35 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import {
-  fetchWallets,
-  fetchWalletSummary,
-  fetchWalletFills,
-} from '../api/wallet';
+import { fetchWalletSummary, fetchWalletFills } from '../api/wallet';
 
 const REFRESH_INTERVAL = 15_000;
 
 export function useWalletData() {
-  const [wallets, setWallets] = useState([]);
   const [selectedWallet, setSelectedWallet] = useState('');
+  const [activeWallet, setActiveWallet] = useState('');
   const [summary, setSummary] = useState(null);
   const [fills, setFills] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-
-  const loadWallets = useCallback(async () => {
-    try {
-      const response = await fetchWallets();
-      const list = response.wallets || [];
-      setWallets(list);
-      setSelectedWallet((current) => {
-        if (current && list.includes(current)) {
-          return current;
-        }
-        return list[0] || '';
-      });
-    } catch (err) {
-      setError(err.message || 'Failed to load wallets');
-    }
-  }, []);
 
   const loadData = useCallback(async (address) => {
     if (!address) {
@@ -54,22 +34,36 @@ export function useWalletData() {
   }, []);
 
   useEffect(() => {
-    loadWallets();
-  }, [loadWallets]);
-
-  useEffect(() => {
-    if (!selectedWallet) {
+    if (!activeWallet) {
       return;
     }
-    loadData(selectedWallet);
-    const timer = setInterval(() => loadData(selectedWallet), REFRESH_INTERVAL);
+    loadData(activeWallet);
+    const timer = setInterval(() => loadData(activeWallet), REFRESH_INTERVAL);
     return () => clearInterval(timer);
-  }, [loadData, selectedWallet]);
+  }, [activeWallet, loadData]);
 
   const positions = useMemo(() => summary?.positions || [], [summary]);
 
+  const refresh = useCallback(() => {
+    const trimmed = selectedWallet.trim();
+    if (!trimmed) {
+      setActiveWallet('');
+      setSummary(null);
+      setFills([]);
+      setError('');
+      return;
+    }
+    setError('');
+    setActiveWallet((current) => {
+      if (current === trimmed) {
+        loadData(trimmed);
+        return current;
+      }
+      return trimmed;
+    });
+  }, [loadData, selectedWallet]);
+
   return {
-    wallets,
     selectedWallet,
     setSelectedWallet,
     summary,
@@ -77,8 +71,7 @@ export function useWalletData() {
     fills,
     loading,
     error,
-    refresh: () => loadData(selectedWallet),
-    reloadWallets: loadWallets,
+    refresh,
   };
 }
 

@@ -1,9 +1,5 @@
 import apiClient from './client';
 
-export function fetchWallets() {
-  return apiClient.get('/wallets');
-}
-
 export function fetchWalletSummary(address) {
   return apiClient.get(`/wallets/${address}`);
 }
