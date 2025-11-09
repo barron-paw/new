@@ -160,7 +160,10 @@ class UserMonitor:
 
         self._monitor = monitor
         try:
-            monitor.start()
+            try:
+                monitor.start(handle_signals=False)  # type: ignore[call-arg]
+            except TypeError:
+                monitor.start()
         except Exception as exc:  # pragma: no cover
             logger.error("Monitor loop crashed for user %s: %s", self.user_id, exc)
         finally:

@@ -83,48 +83,74 @@ export default function MonitorConfigPanel() {
 
   return (
     <section className="dashboard__section monitor-config">
-      <div className="monitor-config__grid">
-        <div className="monitor-config__form-wrapper">
+      <div className="monitor-config__header">
+        <div>
           <h2>监控配置</h2>
-          {helperText ? <p className="monitor-config__helper">{helperText}</p> : null}
+          <p>填写 Telegram 凭证与钱包地址，保存后服务器会自动启动监控并推送交易提醒。</p>
+        </div>
+        {status ? <div className="monitor-config__status">{status}</div> : null}
+      </div>
+
+      {helperText ? <p className="monitor-config__helper">{helperText}</p> : null}
+
+      <div className="monitor-config__layout">
+        <div className="monitor-config__card monitor-config__card--form">
           <form className="monitor-config__form" onSubmit={handleSubmit}>
-            <label>
-              Telegram Bot Token
-              <input
-                type="text"
-                value={form.telegramBotToken}
-                onChange={(event) => setForm((prev) => ({ ...prev, telegramBotToken: event.target.value }))}
-                placeholder="例如：123456:ABCDEF"
-                disabled={!canEdit || loading}
-              />
-            </label>
-            <label>
-              Telegram Chat ID
-              <input
-                type="text"
-                value={form.telegramChatId}
-                onChange={(event) => setForm((prev) => ({ ...prev, telegramChatId: event.target.value }))}
-                placeholder="群组或私聊 ID"
-                disabled={!canEdit || loading}
-              />
-            </label>
-            <label>
-              钱包地址（每行一个或使用逗号分隔）
-              <textarea
-                rows={6}
-                value={form.walletAddresses}
-                onChange={(event) => setForm((prev) => ({ ...prev, walletAddresses: event.target.value }))}
-                placeholder="0x1234...\n0xabcd..."
-                disabled={!canEdit || loading}
-              />
-            </label>
-            <button type="submit" disabled={!canEdit || loading}>
-              {loading ? '处理中…' : '保存配置'}
-            </button>
-            {status ? <p className="monitor-config__message">{status}</p> : null}
+            <div className="monitor-config__fieldset">
+              <span className="monitor-config__legend">Telegram 凭证</span>
+              <div className="monitor-config__input-row">
+                <label className="monitor-config__field">
+                  <span>Bot Token</span>
+                  <input
+                    type="text"
+                    value={form.telegramBotToken}
+                    onChange={(event) => setForm((prev) => ({ ...prev, telegramBotToken: event.target.value }))}
+                    placeholder="例如：123456789:ABCDEF"
+                    disabled={!canEdit || loading}
+                  />
+                  <small>来自 BotFather 的 Token，建议先测试是否能成功发送消息。</small>
+                </label>
+                <label className="monitor-config__field">
+                  <span>Chat ID</span>
+                  <input
+                    type="text"
+                    value={form.telegramChatId}
+                    onChange={(event) => setForm((prev) => ({ ...prev, telegramChatId: event.target.value }))}
+                    placeholder="群组或私聊 ID"
+                    disabled={!canEdit || loading}
+                  />
+                  <small>可通过 @TelegramBotRaw 或 @userinfobot 查询。</small>
+                </label>
+              </div>
+            </div>
+
+            <div className="monitor-config__fieldset">
+              <span className="monitor-config__legend">钱包列表</span>
+              <label className="monitor-config__field">
+                <span>监控地址</span>
+                <textarea
+                  rows={7}
+                  value={form.walletAddresses}
+                  onChange={(event) => setForm((prev) => ({ ...prev, walletAddresses: event.target.value }))}
+                  placeholder="0x1234...\n0xabcd..."
+                  disabled={!canEdit || loading}
+                />
+                <small>每行一个地址，或使用逗号分隔；保存后 30 秒内生效。</small>
+              </label>
+            </div>
+
+            <div className="monitor-config__actions">
+              <button type="submit" disabled={!canEdit || loading}>
+                {loading ? '处理中…' : '保存配置'}
+              </button>
+              <p className="monitor-config__hint">保存后可在控制台查看监控线程是否启动。</p>
+            </div>
           </form>
         </div>
-        <BotFatherGuide />
+
+        <div className="monitor-config__card monitor-config__card--guide">
+          <BotFatherGuide />
+        </div>
       </div>
     </section>
   );
