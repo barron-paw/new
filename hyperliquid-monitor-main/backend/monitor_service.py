@@ -159,7 +159,27 @@ class UserMonitor:
             return
 
         self._monitor = monitor
+        original_signal_handler = None
         try:
+            import signal
+        except Exception:  # pragma: no cover - extremely defensive
+            signal = None  # type: ignore
+
+        try:
+            if signal is not None:
+                original_signal_handler = signal.signal
+
+                def _ignore_signal(sig, handler):
+                    logger.debug(
+                        "Ignoring signal registration %s for user %s", sig, self.user_id
+                    )
+                    return None
+
+                try:
+                    signal.signal = _ignore_signal  # type: ignore[assignment]
+                except Exception:  # pragma: no cover - best effort
+                    original_signal_handler = None
+
             try:
                 monitor.start(handle_signals=False)  # type: ignore[call-arg]
             except TypeError:
@@ -167,6 +187,11 @@ class UserMonitor:
         except Exception as exc:  # pragma: no cover
             logger.error("Monitor loop crashed for user %s: %s", self.user_id, exc)
         finally:
+            if signal is not None and original_signal_handler is not None:
+                try:
+                    signal.signal = original_signal_handler  # type: ignore[assignment]
+                except Exception:  # pragma: no cover
+                    logger.debug("Failed to restore original signal handler")
             try:
                 monitor.stop()
             except Exception:
