@@ -81,6 +81,13 @@ def get_user_by_id(user_id: int) -> Optional[Dict[str, Any]]:
         return dict(row) if row else None
 
 
+def get_user_by_payment_hash(tx_hash: str) -> Optional[Dict[str, Any]]:
+    with get_db() as conn:
+        cursor = conn.execute("SELECT * FROM users WHERE last_payment_hash = ?", (tx_hash.lower(),))
+        row = cursor.fetchone()
+        return dict(row) if row else None
+
+
 def list_users() -> List[Dict[str, Any]]:
     with get_db() as conn:
         cursor = conn.execute("SELECT * FROM users")

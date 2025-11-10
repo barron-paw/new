@@ -40,6 +40,12 @@
   color: var(--text-muted);
 }
 
+.subscription-panel__notice {
+  margin-top: var(--space-sm);
+  font-size: 0.9rem;
+  color: var(--danger);
+}
+
 .subscription-panel__form {
   display: flex;
   flex-direction: column;
@@ -243,4 +249,21 @@
 .monitor-config__card--guide {
   background: linear-gradient(160deg, rgba(33, 45, 120, 0.75), rgba(15, 21, 52, 0.9));
   border: 1px solid rgba(90, 110, 255, 0.25);
+}
+
+.dashboard__footer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  font-size: 0.9rem;
+  color: var(--text-muted);
+}
+
+.dashboard__footer a {
+  color: var(--accent-primary);
+  text-decoration: none;
+}
+
+.dashboard__footer a:hover {
+  text-decoration: underline;
 }

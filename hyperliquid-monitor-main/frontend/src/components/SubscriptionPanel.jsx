@@ -71,6 +71,9 @@ export default function SubscriptionPanel() {
             <li>收款地址（BSC）：<code>{PAYMENT_ADDRESS}</code></li>
             <li>完成支付后提交交易哈希，系统会自动延长订阅有效期。</li>
           </ul>
+          <p className="subscription-panel__notice">
+            注意：支付金额必须 ≥ 7.9&nbsp;USDT，否则可能会订阅失败。
+          </p>
         </div>
         <form className="subscription-panel__form" onSubmit={handleSubmit}>
           <label>

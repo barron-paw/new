@@ -33,8 +33,14 @@ export function Dashboard() {
   );
 
   const footer = (
-    <div>
-      Data polled directly from Hyperliquid public endpoints. Refresh interval 15s. Adjust via <code>useWalletData</code>.
+    <div className="dashboard__footer">
+      <p>
+        Data polled directly from Hyperliquid public endpoints. Refresh interval 15s. Adjust via{' '}
+        <code>useWalletData</code>.
+      </p>
+      <p>
+        联系邮箱：<a href="mailto:baobangran@gamil.com">baobangran@gamil.com</a>
+      </p>
     </div>
   );
 

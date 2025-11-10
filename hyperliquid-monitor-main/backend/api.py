@@ -8,6 +8,7 @@ import threading
 import time
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+from email.header import Header
 from email.message import EmailMessage
 from typing import Any, Dict, List, Optional
 
@@ -24,6 +25,7 @@ from .database import (
     create_user,
     get_user_by_email,
     get_user_by_id,
+    get_user_by_payment_hash,
     get_user_config,
     list_users,
     update_user,
@@ -55,6 +57,7 @@ JWT_ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
 JWT_EXPIRES_MINUTES = int(os.getenv("JWT_EXPIRES_MINUTES", "43200"))
 TRIAL_DAYS = int(os.getenv("TRIAL_DAYS", "3"))
 
+BSC_RPC_URL = os.getenv("BSC_RPC_URL", "https://bsc-dataseed.binance.org")
 BSCSCAN_API_KEY = os.getenv("BSCSCAN_API_KEY", "")
 BSCSCAN_BASE_URL = os.getenv("BSCSCAN_BASE_URL", "https://api.bscscan.com/api")
 USDT_CONTRACT = os.getenv("USDT_CONTRACT", "0x55d398326f99059ff775485246999027b3197955").lower()
@@ -501,6 +504,10 @@ def verify_subscription(
     if current_user.get("last_payment_hash") == tx_hash:
         return UserInfo(**_serialize_user(current_user))
 
+    existing_owner = get_user_by_payment_hash(tx_hash)
+    if existing_owner and existing_owner["id"] != current_user["id"]:
+        raise HTTPException(status_code=400, detail="Transaction hash already used by another account")
+
     payment_data = _verify_payment_on_chain(tx_hash)
     logger.info("Validated subscription payment from %s for tx %s", payment_data.get("from_address"), tx_hash)
     now = _now()
@@ -573,23 +580,51 @@ def _topic_to_address(topic: str) -> str:
 def _send_email(recipient: str, subject: str, body: str) -> None:
     if not EMAIL_ENABLED or not recipient:
         return
+    clean_recipient = (recipient or "").replace("\u00a0", "").strip()
+    clean_subject = (subject or "").replace("\u00a0", " ").strip()
+    clean_from = (SMTP_FROM or SMTP_USERNAME or "").replace("\u00a0", "").strip()
+    if not clean_from and SMTP_USERNAME:
+        clean_from = SMTP_USERNAME.strip()
+    clean_body = (body or "").replace("\u00a0", " ").strip()
+    clean_username = (SMTP_USERNAME or "").replace("\u00a0", "").strip()
+    clean_password = (SMTP_PASSWORD or "").replace("\u00a0", "").strip()
     message = EmailMessage()
-    message["Subject"] = subject
-    message["From"] = SMTP_FROM or SMTP_USERNAME
-    message["To"] = recipient
-    message.set_content(body)
+    message["Subject"] = str(Header(clean_subject, "utf-8"))
+    message["From"] = clean_from
+    message["To"] = clean_recipient
+    message.set_content(clean_body, charset="utf-8")
     try:
         with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=30) as server:
             server.starttls()
-            server.login(SMTP_USERNAME, SMTP_PASSWORD)
+            server.login(clean_username, clean_password)
             server.send_message(message)
     except Exception as exc:  # pragma: no cover - email failures are non-critical
-        logger.warning("Failed to send email to %s: %s", recipient, exc)
+        logger.warning("Failed to send email to %s: %s", clean_recipient or recipient, exc)
 
 
-def _verify_payment_on_chain(tx_hash: str) -> Dict[str, Any]:
+def _get_tx_receipt(tx_hash: str) -> Dict[str, Any]:
+    if BSC_RPC_URL:
+        try:
+            payload = {"jsonrpc": "2.0", "method": "eth_getTransactionReceipt", "params": [tx_hash], "id": 1}
+            response = requests.post(BSC_RPC_URL, json=payload, timeout=30)
+            response.raise_for_status()
+            data = response.json()
+            if "error" in data and data["error"]:
+                message = data["error"].get("message", "Unknown BSC RPC error")
+                logger.error("BSC RPC error for tx %s: %s", tx_hash, message)
+                raise HTTPException(status_code=400, detail=f"BSC RPC error: {message}")
+            receipt = data.get("result")
+            if receipt:
+                return receipt
+        except HTTPException:
+            raise
+        except Exception as exc:
+            logger.warning("Primary BSC RPC (%s) failed for tx %s: %s", BSC_RPC_URL, tx_hash, exc)
     if not BSCSCAN_API_KEY:
-        raise HTTPException(status_code=500, detail="BscScan API key not configured")
+        raise HTTPException(
+            status_code=500,
+            detail="Unable to query transaction receipt. Configure BSC_RPC_URL or BSCSCAN_API_KEY.",
+        )
     params = {
         "module": "proxy",
         "action": "eth_getTransactionReceipt",
@@ -599,10 +634,28 @@ def _verify_payment_on_chain(tx_hash: str) -> Dict[str, Any]:
     response = requests.get(BSCSCAN_BASE_URL, params=params, timeout=30)
     response.raise_for_status()
     payload = response.json()
+    status_flag = payload.get("status")
     result = payload.get("result")
+    if isinstance(result, str):
+        message = payload.get("message") or "BscScan error"
+        detail = f"{message}: {result}"
+        logger.error("BscScan proxy error for tx %s: %s", tx_hash, detail)
+        raise HTTPException(status_code=502, detail=f"BscScan error: {detail}")
+    if status_flag == "0" and not result:
+        message = payload.get("message") or "Unknown BscScan error"
+        detail = f"{message}: {payload.get('result')}"
+        logger.error("BscScan status=0 for tx %s: %s", tx_hash, detail)
+        raise HTTPException(status_code=400, detail=detail)
     if not result:
         raise HTTPException(status_code=400, detail="Transaction not found or pending confirmation")
-    if result.get("status") == "0x0":
+    return result
+
+
+def _verify_payment_on_chain(tx_hash: str) -> Dict[str, Any]:
+    result = _get_tx_receipt(tx_hash)
+    if isinstance(result, str):
+        raise HTTPException(status_code=502, detail=f"BSC RPC returned invalid result: {result}")
+    if "status" in result and result.get("status") == "0x0":
         raise HTTPException(status_code=400, detail="Transaction failed on chain")
 
     contract = USDT_CONTRACT.lower()
