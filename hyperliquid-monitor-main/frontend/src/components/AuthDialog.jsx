@@ -27,15 +27,15 @@ export default function AuthDialog({ open, mode = 'login', onClose, onSwitch }) 
   const metadata = mode === 'register'
     ? {
         title: isEnglish ? 'Create Account' : '注册账号',
+        submitText: isEnglish ? 'Register & Start 3-Day Trial' : '注册并开始 3 天试用',
         switchText: isEnglish ? 'Already have an account? Sign in' : '已有账号？点此登录',
         target: 'login',
-        submitText: isEnglish ? 'Register & Start 3-Day Trial' : '注册并开始 3 天试用',
       }
     : {
         title: isEnglish ? 'Sign In' : '登录账号',
+        submitText: isEnglish ? 'Sign In' : '登录',
         switchText: isEnglish ? 'No account? Register' : '没有账号？点此注册',
         target: 'register',
-        submitText: isEnglish ? 'Sign In' : '登录',
       };
 
   const handleRequestVerification = async () => {
@@ -78,7 +78,7 @@ export default function AuthDialog({ open, mode = 'login', onClose, onSwitch }) 
       }
       onClose();
     } catch (err) {
-      setLocalError(err.message || (isEnglish ? 'Action failed, please retry later.' : '操作失败，请稍后再试')); 
+      setLocalError(err.message || (isEnglish ? 'Action failed, please retry later.' : '操作失败，请稍后再试'));
     } finally {
       setSubmitting(false);
     }
@@ -94,7 +94,7 @@ export default function AuthDialog({ open, mode = 'login', onClose, onSwitch }) 
           </button>
         </div>
         <form className="auth-dialog__form" onSubmit={handleSubmit}>
-          <label>
+          <label className="auth-dialog__field">
             <span>{isEnglish ? 'Email' : '邮箱'}</span>
             <input
               type="email"
@@ -103,7 +103,7 @@ export default function AuthDialog({ open, mode = 'login', onClose, onSwitch }) 
               required
             />
           </label>
-          <label>
+          <label className="auth-dialog__field">
             <span>{isEnglish ? 'Password' : '密码'}</span>
             <input
               type="password"
@@ -114,7 +114,7 @@ export default function AuthDialog({ open, mode = 'login', onClose, onSwitch }) 
             />
           </label>
           {mode === 'register' ? (
-            <label>
+            <label className="auth-dialog__field">
               <span>{isEnglish ? 'Verification Code' : '验证码'}</span>
               <div className="auth-dialog__code-row">
                 <input

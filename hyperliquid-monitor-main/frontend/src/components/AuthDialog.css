@@ -45,23 +45,59 @@
   gap: var(--space-md);
 }
 
-.auth-dialog__label {
+.auth-dialog__field {
   display: flex;
   flex-direction: column;
   gap: var(--space-xs);
   font-size: 0.95rem;
 }
 
-.auth-dialog__label input {
+.auth-dialog__field span {
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+.auth-dialog__field input {
   padding: var(--space-sm) var(--space-md);
   border-radius: var(--radius-md);
   border: 1px solid var(--border-stronger);
   background: var(--surface-control);
   color: var(--text-primary);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
-.auth-dialog__label input:focus {
+.auth-dialog__field input:focus {
   outline: none;
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 0 1px rgba(91, 124, 250, 0.35);
+}
+
+.auth-dialog__code-row {
+  display: flex;
+  gap: var(--space-sm);
+}
+
+.auth-dialog__code-row input {
+  flex: 1;
+}
+
+.auth-dialog__code-row button {
+  padding: 0 var(--space-md);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-stronger);
+  background: rgba(91, 124, 250, 0.12);
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: background 0.2s ease, border-color 0.2s ease;
+}
+
+.auth-dialog__code-row button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.auth-dialog__code-row button:not(:disabled):hover {
+  background: rgba(91, 124, 250, 0.2);
   border-color: var(--accent-primary);
 }
 
