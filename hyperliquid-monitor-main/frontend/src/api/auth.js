@@ -1,17 +1,19 @@
 import apiClient, { setAuthToken, getAuthToken } from './client';
 
+export async function loginUser(payload) {
+  const response = await apiClient.post('/auth/login', payload);
+  if (response?.token) {
+    setAuthToken(response.token);
+  }
+  return response?.user || null;
+}
+
 export async function registerUser(payload) {
   const response = await apiClient.post('/auth/register', payload);
-  setAuthToken(response.token);
-  return response.user;
-}
-
-export function login(payload) {
-  return apiClient.post('/auth/login', payload);
-}
-
-export function register(payload) {
-  return apiClient.post('/auth/register', payload);
+  if (response?.token) {
+    setAuthToken(response.token);
+  }
+  return response?.user || null;
 }
 
 export async function fetchCurrentUser() {
@@ -28,10 +30,10 @@ export async function fetchCurrentUser() {
   }
 }
 
-export function requestVerificationCode(payload) {
-  return apiClient.post('/auth/request_verification', payload);
-}
-
 export function logoutUser() {
   setAuthToken(null);
+}
+
+export function requestVerificationCode(payload) {
+  return apiClient.post('/auth/request_verification', payload);
 }

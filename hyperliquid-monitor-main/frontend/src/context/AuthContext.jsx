@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useState } from 'react';
-import { loginUser, registerUser, fetchCurrentUser, logoutUser as clearToken } from '../api/auth';
+import { loginUser, registerUser, fetchCurrentUser, logoutUser } from '../api/auth.js';
 
 const AuthContext = createContext({
   user: null,
@@ -55,7 +55,7 @@ export function AuthProvider({ children }) {
   }, []);
 
   const logout = useCallback(() => {
-    clearToken();
+    logoutUser();
     setUser(null);
   }, []);
 

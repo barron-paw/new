@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useAuth } from '../context/AuthContext.jsx';
 import './AuthDialog.css';
 import { useLanguage } from '../context/LanguageContext.jsx';
-import { login, register, requestVerificationCode } from '../api/auth.js';
+import { requestVerificationCode } from '../api/auth.js';
 
 export default function AuthDialog({ open, mode = 'login', onClose, onSwitch }) {
   const { login, register, error } = useAuth();
@@ -30,7 +30,7 @@ export default function AuthDialog({ open, mode = 'login', onClose, onSwitch }) 
 
   useEffect(() => {
     if (!open) {
-      setForm({ email: '', password: '' });
+      setForm({ email: '', password: '', verificationCode: '' });
       setLocalError('');
     }
   }, [open, mode]);
