@@ -94,7 +94,7 @@ export default function AuthDialog({ open, mode = 'login', onClose, onSwitch }) 
           </button>
         </div>
         <form className="auth-dialog__form" onSubmit={handleSubmit}>
-          <label>
+          <label className="auth-dialog__field">
             <span>{isEnglish ? 'Email' : '邮箱'}</span>
             <input
               type="email"
@@ -103,7 +103,7 @@ export default function AuthDialog({ open, mode = 'login', onClose, onSwitch }) 
               required
             />
           </label>
-          <label>
+          <label className="auth-dialog__field">
             <span>{isEnglish ? 'Password' : '密码'}</span>
             <input
               type="password"
@@ -114,7 +114,7 @@ export default function AuthDialog({ open, mode = 'login', onClose, onSwitch }) 
             />
           </label>
           {mode === 'register' ? (
-            <label>
+            <label className="auth-dialog__field">
               <span>{isEnglish ? 'Verification Code' : '验证码'}</span>
               <div className="auth-dialog__code-row">
                 <input

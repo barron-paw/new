@@ -194,6 +194,15 @@ export default function MonitorConfigPanel() {
                   : '保存后可在控制台查看监控线程是否启动。'}
               </p>
             </div>
+
+            <div className="monitor-config__details">
+              <p className="monitor-config__details-title">{isEnglish ? 'Monitoring Behaviour' : '监控提醒说明'}</p>
+              <ul className="monitor-config__details-list">
+                <li>{isEnglish ? 'Every time you save the configuration, a fresh position snapshot is pushed immediately.' : '每次保存配置后，立即发送当前持仓快照。'}</li>
+                <li>{isEnglish ? 'After monitoring is enabled, every open or close event triggers a notification.' : '保存配置并启用监控后，每次开仓或平仓都会推送提醒。'}</li>
+                <li>{isEnglish ? 'A consolidated position snapshot is delivered every 4 hours automatically.' : '系统会每 4 小时自动发送一次持仓快照。'}</li>
+              </ul>
+            </div>
           </form>
         </div>
 
