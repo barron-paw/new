@@ -22,8 +22,7 @@ export async function fetchCurrentUser() {
     if (!token) {
       return null;
     }
-    const user = await apiClient.get('/auth/me');
-    return user;
+    return await apiClient.get('/auth/me');
   } catch (error) {
     setAuthToken(null);
     return null;
