@@ -6,10 +6,12 @@ export async function registerUser(payload) {
   return response.user;
 }
 
-export async function loginUser(payload) {
-  const response = await apiClient.post('/auth/login', payload);
-  setAuthToken(response.token);
-  return response.user;
+export function login(payload) {
+  return apiClient.post('/auth/login', payload);
+}
+
+export function register(payload) {
+  return apiClient.post('/auth/register', payload);
 }
 
 export async function fetchCurrentUser() {
@@ -24,6 +26,10 @@ export async function fetchCurrentUser() {
     setAuthToken(null);
     return null;
   }
+}
+
+export function requestVerificationCode(payload) {
+  return apiClient.post('/auth/request_verification', payload);
 }
 
 export function logoutUser() {

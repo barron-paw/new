@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useAuth } from '../context/AuthContext.jsx';
 import './AuthDialog.css';
 import { useLanguage } from '../context/LanguageContext.jsx';
+import { login, register, requestVerificationCode } from '../api/auth.js';
 
 export default function AuthDialog({ open, mode = 'login', onClose, onSwitch }) {
   const { login, register, error } = useAuth();
@@ -23,7 +24,7 @@ export default function AuthDialog({ open, mode = 'login', onClose, onSwitch }) 
     },
   };
 
-  const [form, setForm] = useState({ email: '', password: '' });
+  const [form, setForm] = useState({ email: '', password: '', verificationCode: '' });
   const [submitting, setSubmitting] = useState(false);
   const [localError, setLocalError] = useState('');
 
@@ -40,15 +41,39 @@ export default function AuthDialog({ open, mode = 'login', onClose, onSwitch }) 
 
   const metadata = modes[mode] || modes.login;
 
+  const handleRequestVerification = async () => {
+    const email = form.email.trim();
+    if (!email) {
+      setLocalError(isEnglish ? 'Please enter your email first.' : '请先填写邮箱。');
+      return;
+    }
+    setLocalError('');
+    try {
+      await requestVerificationCode({ email });
+      setLocalError(isEnglish ? 'Verification code sent. Please check your inbox.' : '验证码已发送，请查收邮箱。');
+    } catch (err) {
+      setLocalError(err.message || (isEnglish ? 'Failed to send verification code.' : '验证码发送失败。'));
+    }
+  };
+
   const handleSubmit = async (event) => {
     event.preventDefault();
     setLocalError('');
+    if (!form.email || !form.password) {
+      setLocalError(isEnglish ? 'Email and password are required.' : '邮箱和密码不能为空。');
+      return;
+    }
     try {
       setSubmitting(true);
       if (mode === 'login') {
         await login(form);
       } else {
-        await register(form);
+        if (!form.verificationCode.trim()) {
+          setLocalError(isEnglish ? 'Verification code is required.' : '请输入邮箱验证码。');
+          setSubmitting(false);
+          return;
+        }
+        await register({ email: form.email, password: form.password, verification_code: form.verificationCode.trim() });
       }
       onClose();
     } catch (err) {
@@ -94,6 +119,21 @@ export default function AuthDialog({ open, mode = 'login', onClose, onSwitch }) 
               minLength={6}
             />
           </label>
+          {mode === 'register' ? (
+            <label>
+              <span>{isEnglish ? 'Verification Code' : '验证码'}</span>
+              <div className="auth-dialog__code-row">
+                <input
+                  type="text"
+                  value={form.verificationCode}
+                  onChange={(event) => setForm((prev) => ({ ...prev, verificationCode: event.target.value }))}
+                />
+                <button type="button" onClick={handleRequestVerification} disabled={submitting}>
+                  {isEnglish ? 'Send Code' : '获取验证码'}
+                </button>
+              </div>
+            </label>
+          ) : null}
 
           {(localError || error) ? (
             <div className="auth-dialog__error">{localError || error}</div>
