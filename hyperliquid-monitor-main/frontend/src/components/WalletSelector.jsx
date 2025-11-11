@@ -1,7 +1,10 @@
 import { useCallback } from 'react';
 import './WalletSelector.css';
+import { useLanguage } from '../context/LanguageContext.jsx';
 
 export function WalletSelector({ value, onChange, onRefresh, isLoading }) {
+  const { language } = useLanguage();
+  const isEnglish = language === 'en';
   const handleInputChange = useCallback(
     (event) => {
       onChange?.(event.target.value);
@@ -22,7 +25,9 @@ export function WalletSelector({ value, onChange, onRefresh, isLoading }) {
   return (
     <div className="wallet-selector">
       <div className="wallet-selector__input-wrapper">
-        <label className="wallet-selector__label" htmlFor="wallet-input">Wallet</label>
+        <label className="wallet-selector__label" htmlFor="wallet-input">
+          {isEnglish ? 'Wallet' : '钱包'}
+        </label>
         <input
           id="wallet-input"
           type="text"
@@ -30,7 +35,7 @@ export function WalletSelector({ value, onChange, onRefresh, isLoading }) {
           value={value}
           onChange={handleInputChange}
           onKeyDown={handleKeyDown}
-          placeholder="请输入钱包地址"
+          placeholder={isEnglish ? 'Enter wallet address' : '请输入钱包地址'}
           spellCheck="false"
         />
       </div>
@@ -41,7 +46,7 @@ export function WalletSelector({ value, onChange, onRefresh, isLoading }) {
         onClick={onRefresh}
         disabled={!value.trim() || isLoading}
       >
-        {isLoading ? '加载中…' : '刷新'}
+        {isLoading ? (isEnglish ? 'Loading…' : '加载中…') : isEnglish ? 'Refresh' : '刷新'}
       </button>
     </div>
   );

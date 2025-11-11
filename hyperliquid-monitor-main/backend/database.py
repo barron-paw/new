@@ -33,10 +33,16 @@ def init_db() -> None:
                 telegram_chat_id TEXT,
                 wallet_addresses TEXT,
                 updated_at TEXT,
+                language TEXT DEFAULT 'zh',
                 FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
             )
             """
         )
+        # Ensure newer columns exist for legacy databases
+        cursor = conn.execute("PRAGMA table_info(user_configs)")
+        existing_columns = {row[1] for row in cursor.fetchall()}
+        if "language" not in existing_columns:
+            conn.execute("ALTER TABLE user_configs ADD COLUMN language TEXT DEFAULT 'zh'")
         conn.commit()
 
 
@@ -105,6 +111,7 @@ def get_user_config(user_id: int) -> Dict[str, Any]:
                 "telegram_chat_id": None,
                 "wallet_addresses": [],
                 "updated_at": None,
+                "language": "zh",
             }
         raw_wallets = row["wallet_addresses"] or "[]"
         try:
@@ -113,11 +120,18 @@ def get_user_config(user_id: int) -> Dict[str, Any]:
                 wallets = []
         except json.JSONDecodeError:
             wallets = [addr.strip() for addr in raw_wallets.split(",") if addr.strip()]
+        language = "zh"
+        if hasattr(row, "keys") and "language" in row.keys():
+            value = row["language"] or "zh"
+            language = value.lower() if isinstance(value, str) else "zh"
+            if language not in {"zh", "en"}:
+                language = "zh"
         return {
             "telegram_bot_token": row["telegram_bot_token"],
             "telegram_chat_id": row["telegram_chat_id"],
             "wallet_addresses": wallets,
             "updated_at": row["updated_at"],
+            "language": language,
         }
 
 
@@ -126,21 +140,26 @@ def upsert_user_config(
     telegram_bot_token: Optional[str],
     telegram_chat_id: Optional[str],
     wallet_addresses: List[str],
+    language: str,
 ) -> Dict[str, Any]:
     payload = json.dumps(wallet_addresses)
     updated_at = datetime.now(timezone.utc).isoformat()
+    language_value = (language or "zh").lower()
+    if language_value not in {"zh", "en"}:
+        language_value = "zh"
     with get_db() as conn:
         conn.execute(
             """
-            INSERT INTO user_configs (user_id, telegram_bot_token, telegram_chat_id, wallet_addresses, updated_at)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO user_configs (user_id, telegram_bot_token, telegram_chat_id, wallet_addresses, updated_at, language)
+            VALUES (?, ?, ?, ?, ?, ?)
             ON CONFLICT(user_id) DO UPDATE SET
                 telegram_bot_token = excluded.telegram_bot_token,
                 telegram_chat_id = excluded.telegram_chat_id,
                 wallet_addresses = excluded.wallet_addresses,
-                updated_at = excluded.updated_at
+                updated_at = excluded.updated_at,
+                language = excluded.language
             """,
-            (user_id, telegram_bot_token, telegram_chat_id, payload, updated_at),
+            (user_id, telegram_bot_token, telegram_chat_id, payload, updated_at, language_value),
         )
         conn.commit()
     return get_user_config(user_id)

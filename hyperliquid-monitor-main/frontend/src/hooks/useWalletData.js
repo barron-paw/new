@@ -1,9 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { fetchWalletSummary, fetchWalletFills } from '../api/wallet';
+import { useLanguage } from '../context/LanguageContext.jsx';
 
 const REFRESH_INTERVAL = 15_000;
 
 export function useWalletData() {
+  const { language } = useLanguage();
+  const isEnglish = language === 'en';
   const [selectedWallet, setSelectedWallet] = useState('');
   const [activeWallet, setActiveWallet] = useState('');
   const [summary, setSummary] = useState(null);
@@ -27,11 +30,11 @@ export function useWalletData() {
       setSummary(summaryResponse);
       setFills(fillsResponse.items || []);
     } catch (err) {
-      setError(err.message || 'Failed to load wallet data');
+      setError(err.message || (isEnglish ? 'Failed to load wallet data' : '加载钱包数据失败'));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [isEnglish]);
 
   useEffect(() => {
     if (!activeWallet) {

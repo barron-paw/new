@@ -252,6 +252,7 @@ class MonitorConfig(BaseModel):
     telegram_bot_token: Optional[str] = Field(None, alias="telegramBotToken")
     telegram_chat_id: Optional[str] = Field(None, alias="telegramChatId")
     wallet_addresses: List[str] = Field(default_factory=list, alias="walletAddresses")
+    language: str = Field("zh", alias="language")
 
     class Config:
         populate_by_name = True
@@ -542,6 +543,7 @@ def get_monitor_config(current_user: Dict[str, Any] = Depends(_require_current_u
         telegram_bot_token=stored.get("telegram_bot_token"),
         telegram_chat_id=stored.get("telegram_chat_id"),
         wallet_addresses=stored.get("wallet_addresses", []),
+        language=stored.get("language", "zh"),
     )
 
 
@@ -552,22 +554,28 @@ def update_monitor_config(
 ) -> MonitorConfig:
     _ensure_monitor_access(current_user)
     wallets = [addr.strip() for addr in payload.wallet_addresses if addr.strip()]
+    language = (payload.language or "zh").lower()
+    if language not in {"zh", "en"}:
+        language = "zh"
     record = upsert_user_config(
         current_user["id"],
         (payload.telegram_bot_token or "").strip() or None,
         (payload.telegram_chat_id or "").strip() or None,
         wallets,
+        language,
     )
     configure_user_monitor(
         current_user["id"],
         telegram_bot_token=record.get("telegram_bot_token"),
         telegram_chat_id=record.get("telegram_chat_id"),
         wallet_addresses=record.get("wallet_addresses", []),
+        language=record.get("language", "zh"),
     )
     return MonitorConfig(
         telegram_bot_token=record.get("telegram_bot_token"),
         telegram_chat_id=record.get("telegram_chat_id"),
         wallet_addresses=record.get("wallet_addresses", []),
+        language=record.get("language", "zh"),
     )
 
 

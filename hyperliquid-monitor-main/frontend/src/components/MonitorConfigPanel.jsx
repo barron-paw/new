@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../context/AuthContext.jsx';
 import { fetchMonitorConfig, updateMonitorConfig } from '../api/config.js';
 import BotFatherGuide from './BotFatherGuide.jsx';
+import { useLanguage } from '../context/LanguageContext.jsx';
 
 function parseAddresses(value) {
   return value
@@ -12,10 +13,13 @@ function parseAddresses(value) {
 
 export default function MonitorConfigPanel() {
   const { user } = useAuth();
+  const { language, setLanguage } = useLanguage();
+  const isEnglish = language === 'en';
   const [form, setForm] = useState({
     telegramBotToken: '',
     telegramChatId: '',
     walletAddresses: '',
+    language: 'zh',
   });
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState('');
@@ -34,25 +38,27 @@ export default function MonitorConfigPanel() {
           telegramBotToken: data.telegramBotToken || '',
           telegramChatId: data.telegramChatId || '',
           walletAddresses: (data.walletAddresses || []).join('\n'),
+          language: data.language || 'zh',
         });
+        setLanguage(data.language || 'zh');
       } catch (err) {
-        setStatus(err.message || '无法加载监控配置');
+        setStatus(isEnglish ? err.message || 'Failed to load monitor configuration' : err.message || '无法加载监控配置');
       } finally {
         setLoading(false);
       }
     };
     loadConfig();
-  }, [canEdit]);
+  }, [canEdit, isEnglish, setLanguage]);
 
   const helperText = useMemo(() => {
     if (!user) {
-      return '请先登录后配置监控信息。';
+      return isEnglish ? 'Please log in to configure monitoring.' : '请先登录后配置监控信息。';
     }
     if (!canEdit) {
-      return '试用已到期或订阅未激活，无法编辑监控配置。';
+      return isEnglish ? 'Trial expired or subscription inactive. Monitoring configuration locked.' : '试用已到期或订阅未激活，无法编辑监控配置。';
     }
     return '';
-  }, [user, canEdit]);
+  }, [user, canEdit, isEnglish]);
 
   const handleSubmit = async (event) => {
     event.preventDefault();
@@ -66,16 +72,19 @@ export default function MonitorConfigPanel() {
         telegramBotToken: form.telegramBotToken.trim() || null,
         telegramChatId: form.telegramChatId.trim() || null,
         walletAddresses: parseAddresses(form.walletAddresses),
+        language: form.language,
       };
       const response = await updateMonitorConfig(payload);
       setForm({
         telegramBotToken: response.telegramBotToken || '',
         telegramChatId: response.telegramChatId || '',
         walletAddresses: (response.walletAddresses || []).join('\n'),
+        language: response.language || 'zh',
       });
-      setStatus('监控配置已保存。');
+      setLanguage(response.language || 'zh');
+      setStatus(isEnglish ? 'Monitoring configuration saved.' : '监控配置已保存。');
     } catch (err) {
-      setStatus(err.message || '保存失败，请稍后重试');
+      setStatus(err.message || (isEnglish ? 'Save failed, please retry later.' : '保存失败，请稍后重试'));
     } finally {
       setLoading(false);
     }
@@ -85,8 +94,12 @@ export default function MonitorConfigPanel() {
     <section className="dashboard__section monitor-config">
       <div className="monitor-config__header">
         <div>
-          <h2>监控配置</h2>
-          <p>填写 Telegram 凭证与钱包地址，保存后服务器会自动启动监控并推送交易提醒。</p>
+          <h2>{isEnglish ? 'Monitoring Configuration' : '监控配置'}</h2>
+          <p>
+            {isEnglish
+              ? 'Provide Telegram credentials and wallet addresses. The server will start monitoring and push trade alerts automatically.'
+              : '填写 Telegram 凭证与钱包地址，保存后服务器会自动启动监控并推送交易提醒。'}
+          </p>
         </div>
         {status ? <div className="monitor-config__status">{status}</div> : null}
       </div>
@@ -97,7 +110,7 @@ export default function MonitorConfigPanel() {
         <div className="monitor-config__card monitor-config__card--form">
           <form className="monitor-config__form" onSubmit={handleSubmit}>
             <div className="monitor-config__fieldset">
-              <span className="monitor-config__legend">Telegram 凭证</span>
+              <span className="monitor-config__legend">{isEnglish ? 'Telegram Credentials' : 'Telegram 凭证'}</span>
               <div className="monitor-config__input-row">
                 <label className="monitor-config__field">
                   <span>Bot Token</span>
@@ -105,10 +118,14 @@ export default function MonitorConfigPanel() {
                     type="text"
                     value={form.telegramBotToken}
                     onChange={(event) => setForm((prev) => ({ ...prev, telegramBotToken: event.target.value }))}
-                    placeholder="例如：123456789:ABCDEF"
+                    placeholder={isEnglish ? 'e.g. 123456789:ABCDEF' : '例如：123456789:ABCDEF'}
                     disabled={!canEdit || loading}
                   />
-                  <small>来自 BotFather 的 Token，建议先测试是否能成功发送消息。</small>
+                  <small>
+                    {isEnglish
+                      ? 'Token obtained from BotFather. Test it with your bot before saving.'
+                      : '来自 BotFather 的 Token，建议先测试是否能成功发送消息。'}
+                  </small>
                 </label>
                 <label className="monitor-config__field">
                   <span>Chat ID</span>
@@ -116,34 +133,66 @@ export default function MonitorConfigPanel() {
                     type="text"
                     value={form.telegramChatId}
                     onChange={(event) => setForm((prev) => ({ ...prev, telegramChatId: event.target.value }))}
-                    placeholder="群组或私聊 ID"
+                    placeholder={isEnglish ? 'Group or chat ID' : '群组或私聊 ID'}
                     disabled={!canEdit || loading}
                   />
-                  <small>可通过 @TelegramBotRaw 或 @userinfobot 查询。</small>
+                  <small>
+                    {isEnglish
+                      ? 'Use @TelegramBotRaw or @userinfobot to retrieve the ID.'
+                      : '可通过 @TelegramBotRaw 或 @userinfobot 查询。'}
+                  </small>
                 </label>
               </div>
             </div>
 
             <div className="monitor-config__fieldset">
-              <span className="monitor-config__legend">钱包列表</span>
+              <span className="monitor-config__legend">{isEnglish ? 'Wallet Addresses' : '钱包列表'}</span>
               <label className="monitor-config__field">
-                <span>监控地址</span>
+                <span>{isEnglish ? 'Addresses to Monitor' : '监控地址'}</span>
                 <textarea
                   rows={7}
                   value={form.walletAddresses}
                   onChange={(event) => setForm((prev) => ({ ...prev, walletAddresses: event.target.value }))}
-                  placeholder="0x1234...\n0xabcd..."
+                  placeholder={isEnglish ? '0x1234...\n0xabcd...' : '0x1234...\n0xabcd...'}
                   disabled={!canEdit || loading}
                 />
-                <small>每行一个地址，或使用逗号分隔；保存后 30 秒内生效。</small>
+                <small>
+                  {isEnglish
+                    ? 'One address per line (or separated by commas). Takes effect within 30 seconds after saving.'
+                    : '每行一个地址，或使用逗号分隔；保存后 30 秒内生效。'}
+                </small>
+              </label>
+            </div>
+
+            <div className="monitor-config__fieldset">
+              <span className="monitor-config__legend">{isEnglish ? 'Language' : '语言'}</span>
+              <label className="monitor-config__field">
+                <span>{isEnglish ? 'Interface language' : '界面语言'}</span>
+                <select
+                  value={form.language}
+                  onChange={(event) => setForm((prev) => ({ ...prev, language: event.target.value }))}
+                  disabled={!canEdit || loading}
+                >
+                  <option value="zh">中文</option>
+                  <option value="en">English</option>
+                </select>
+                <small>
+                  {isEnglish
+                    ? 'Selecting English will switch the UI and Telegram notifications to English.'
+                    : '选择英语后，前端界面与推送信息将使用英文。'}
+                </small>
               </label>
             </div>
 
             <div className="monitor-config__actions">
               <button type="submit" disabled={!canEdit || loading}>
-                {loading ? '处理中…' : '保存配置'}
+                {loading ? (isEnglish ? 'Processing…' : '处理中…') : isEnglish ? 'Save' : '保存配置'}
               </button>
-              <p className="monitor-config__hint">保存后可在控制台查看监控线程是否启动。</p>
+              <p className="monitor-config__hint">
+                {isEnglish
+                  ? 'After saving, check the console to confirm the monitoring service is running.'
+                  : '保存后可在控制台查看监控线程是否启动。'}
+              </p>
             </div>
           </form>
         </div>

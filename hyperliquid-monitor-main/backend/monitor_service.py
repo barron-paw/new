@@ -42,6 +42,7 @@ class _UserConfig:
     telegram_bot_token: str
     telegram_chat_id: str
     wallet_addresses: Tuple[str, ...]
+    language: str = "zh"
 
 
 class UserMonitor:
@@ -83,7 +84,14 @@ class UserMonitor:
         self._state_module = None
         logger.info("Stopped monitor for user %s", self.config.user_id)
 
-    def update(self, *, telegram_bot_token: str, telegram_chat_id: str, wallet_addresses: Tuple[str, ...]) -> None:
+    def update(
+        self,
+        *,
+        telegram_bot_token: str,
+        telegram_chat_id: str,
+        wallet_addresses: Tuple[str, ...],
+        language: str,
+    ) -> None:
         restart_needed = (
             telegram_bot_token != self.config.telegram_bot_token
             or telegram_chat_id != self.config.telegram_chat_id
@@ -94,7 +102,13 @@ class UserMonitor:
             telegram_bot_token=telegram_bot_token,
             telegram_chat_id=telegram_chat_id,
             wallet_addresses=wallet_addresses,
+            language=language or "zh",
         )
+        if self._module is not None:
+            try:
+                setattr(self._module, "LANGUAGE", self.config.language)
+            except Exception:
+                logger.debug("Unable to update LANGUAGE for user %s", self.config.user_id)
         if restart_needed:
             self.stop()
             self.start()
@@ -155,6 +169,7 @@ class UserMonitor:
         module._stop_event = threading.Event()  # type: ignore[attr-defined]
         module._snapshot_initialized = False  # type: ignore[attr-defined]
         module.schedule = _SchedulerWrapper()  # type: ignore[attr-defined]
+        module.LANGUAGE = getattr(self.config, "language", "zh")  # type: ignore[attr-defined]
 
         # Refresh state store configuration to pick custom path/env
         try:
@@ -240,10 +255,14 @@ class MonitorRegistry:
         telegram_bot_token: Optional[str],
         telegram_chat_id: Optional[str],
         wallet_addresses: Iterable[str],
+        language: str,
     ) -> None:
         wallets_tuple = tuple(addr.strip() for addr in wallet_addresses if addr.strip())
         token = (telegram_bot_token or "").strip()
         chat_id = (telegram_chat_id or "").strip()
+        lang = (language or "zh").lower()
+        if lang not in {"zh", "en"}:
+            lang = "zh"
 
         with self._lock:
             existing = self._monitors.get(user_id)
@@ -259,6 +278,7 @@ class MonitorRegistry:
                     telegram_bot_token=token,
                     telegram_chat_id=chat_id,
                     wallet_addresses=wallets_tuple,
+                    language=lang,
                 )
                 return
 
@@ -268,6 +288,7 @@ class MonitorRegistry:
                     telegram_bot_token=token,
                     telegram_chat_id=chat_id,
                     wallet_addresses=wallets_tuple,
+                    language=lang,
                 )
             )
             self._monitors[user_id] = monitor
@@ -289,12 +310,14 @@ def configure_user_monitor(
     telegram_bot_token: Optional[str],
     telegram_chat_id: Optional[str],
     wallet_addresses: Iterable[str],
+    language: str,
 ) -> None:
     registry.configure_user(
         user_id,
         telegram_bot_token=telegram_bot_token,
         telegram_chat_id=telegram_chat_id,
         wallet_addresses=wallet_addresses,
+        language=language,
     )
 
 
@@ -316,5 +339,6 @@ def initialise_monitors_from_db() -> None:
             telegram_bot_token=config.get("telegram_bot_token"),
             telegram_chat_id=config.get("telegram_chat_id"),
             wallet_addresses=config.get("wallet_addresses", []),
+            language=config.get("language", "zh"),
         )
 

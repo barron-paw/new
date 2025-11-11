@@ -1,12 +1,29 @@
 import './FillsList.css';
 import { formatNumber, formatPrice, formatTimestamp } from '../utils/format';
+import { useLanguage } from '../context/LanguageContext.jsx';
 
 export function FillsList({ fills }) {
+  const { language } = useLanguage();
+  const isEnglish = language === 'en';
+
+  const translateSide = (side) => {
+    if (isEnglish) {
+      if (side === 'B' || side === 'buy') return 'Buy';
+      if (side === 'A' || side === 'sell') return 'Sell';
+      return side;
+    }
+    if (side === 'B' || side === 'buy') return '买入';
+    if (side === 'A' || side === 'sell') return '卖出';
+    return side;
+  };
+
   return (
     <section className="fills-list">
       <div className="fills-list__header">
-        <h3>Recent Fills</h3>
-        <span>{fills.length} events</span>
+        <h3>{isEnglish ? 'Recent Fills' : '最新成交'}</h3>
+        <span>
+          {fills.length} {isEnglish ? 'events' : '笔'}
+        </span>
       </div>
       {fills.length ? (
         <ul>
@@ -15,7 +32,7 @@ export function FillsList({ fills }) {
               <div>
                 <strong>{fill.coin}</strong>
                 <span className={`fills-list__side fills-list__side--${fill.side}`}>
-                  {fill.side}
+                  {translateSide(fill.side)}
                 </span>
               </div>
               <div className="fills-list__details">
@@ -28,7 +45,7 @@ export function FillsList({ fills }) {
           ))}
         </ul>
       ) : (
-        <p>No fills recorded for this wallet.</p>
+        <p>{isEnglish ? 'No fills recorded for this wallet.' : '该钱包暂无成交记录。'}</p>
       )}
     </section>
   );

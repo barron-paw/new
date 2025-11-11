@@ -118,6 +118,31 @@ CONFIGURED_ADDRESSES: Tuple[str, ...] = tuple(
     _parse_wallet_addresses(_get_env_var("WALLET_ADDRESSES") or "[]")
 )
 
+LANGUAGE = (_get_env_var("LANGUAGE") or "zh").lower()
+if LANGUAGE not in {"zh", "en"}:
+    LANGUAGE = "zh"
+
+
+def _current_language() -> str:
+    value = globals().get("LANGUAGE", "zh")
+    if isinstance(value, str) and value.lower().startswith("en"):
+        return "en"
+    return "zh"
+
+
+def _is_english() -> bool:
+    return _current_language() == "en"
+
+
+def _side_label(is_long: bool) -> str:
+    if _is_english():
+        return "Long" if is_long else "Short"
+    return "多" if is_long else "空"
+
+
+def _position_mode_label() -> str:
+    return "Cross" if _is_english() else "全仓"
+
 
 def _safe_float(value: Any, default: float = 0.0) -> float:
     try:
@@ -554,7 +579,8 @@ def format_position_message(
     szi = float(position.get("szi", 0) or 0)
 
     is_long = szi > 0
-    position_side = "多" if is_long else "空"
+    position_side = _side_label(is_long)
+    mode_prefix = _position_mode_label()
 
     pnl_percentage = 0.0
     if entry_price > 0 and current_price > 0:
@@ -575,11 +601,34 @@ def format_position_message(
     avg_entry_display = format_number(avg_entry) if avg_entry > 0 else "N/A"
     current_price_display = format_number(current_price)
 
+    if _is_english():
+        return f"""💳 <b>Wallet</b>
+<code>{address}</code>
+
+━━━━━━━━━━━━━━━━━━━━
+<b>{coin}/USDC</b> ({mode_prefix}-{position_side}) {pnl_color}
+━━━━━━━━━━━━━━━━━━━━
+
+📈 <b>Unrealized PnL</b>
+<code>{pnl_sign}{pnl_str}</code> ({pnl_sign}{pnl_percent_str}%)
+
+💳 <b>Position Notional</b>
+<code>${position_value_display}</code>
+
+⚖️ <b>Entry Price</b>
+<code>{avg_entry_display}</code>
+
+💵 <b>Current Price</b>
+<code>{current_price_display}</code>
+
+💰 <b>Account Equity</b>
+<code>${balance_display}</code>"""
+
     return f"""💳 <b>钱包地址</b>
 <code>{address}</code>
 
 ━━━━━━━━━━━━━━━━━━━━
-<b>{coin}/USDC</b> (全仓-{position_side}) {pnl_color}
+<b>{coin}/USDC</b> ({mode_prefix}-{position_side}) {pnl_color}
 ━━━━━━━━━━━━━━━━━━━━
 
 📈 <b>盈亏</b>
@@ -633,7 +682,8 @@ def format_order_placed_message(
     coin = position.get("coin", "")
     szi = _safe_float(position.get("szi"))
     is_long = szi > 0
-    position_side = "多" if is_long else "空"
+    position_side = _side_label(is_long)
+    mode_prefix = _position_mode_label()
 
     position_value = trade_details.get("position_value") or position.get("positionValue")
     position_value = abs(_safe_float(position_value))
@@ -658,13 +708,47 @@ def format_order_placed_message(
     fill_price_display = format_number(fill_price) if fill_price else entry_price_display
     size_display = format_number(position_size) if position_size else "N/A"
 
+    if _is_english():
+        return f"""✅ <b>Position Opened</b>
+
+💳 <b>Wallet</b>
+<code>{address}</code>
+
+━━━━━━━━━━━━━━━━━━━━
+<b>{coin}/USDC</b> ({mode_prefix}-{position_side})
+━━━━━━━━━━━━━━━━━━━━
+
+⚙️ <b>Leverage</b>
+<code>{leverage_display}</code>
+
+🕒 <b>Opened At</b>
+<code>{trade_time_display}</code>
+
+🔗 <b>Transaction Hash</b>
+<code>{tx_hash_display}</code>
+
+📦 <b>Position Size</b>
+<code>{size_display}</code>
+
+💳 <b>Position Notional</b>
+<code>${position_value_display}</code>
+
+⚖️ <b>Entry Price</b>
+<code>{fill_price_display}</code>
+
+💵 <b>Current Price</b>
+<code>{current_price_display}</code>
+
+💰 <b>Account Equity</b>
+<code>${balance_display}</code>"""
+
     return f"""✅ <b>订单已开仓</b>
 
 💳 <b>钱包地址</b>
 <code>{address}</code>
 
 ━━━━━━━━━━━━━━━━━━━━
-<b>{coin}/USDC</b> (全仓-{position_side})
+<b>{coin}/USDC</b> ({mode_prefix}-{position_side})
 ━━━━━━━━━━━━━━━━━━━━
 
 ⚙️ <b>杠杆</b>
@@ -704,7 +788,8 @@ def format_order_closed_message(
     position_value = abs(_safe_float(previous_position.get("positionValue")))
     szi = _safe_float(previous_position.get("szi"))
     is_long = szi > 0
-    position_side = "多" if is_long else "空"
+    position_side = _side_label(is_long)
+    mode_prefix = _position_mode_label()
 
     close_price = _safe_float(trade_details.get("price"))
     size = abs(szi)
@@ -745,13 +830,50 @@ def format_order_closed_message(
     position_value_display = format_number(position_value, 2)
     balance_display = format_number(balance, 2)
 
+    if _is_english():
+        return f"""❌ <b>Position Closed</b> {pnl_color}
+
+💳 <b>Wallet</b>
+<code>{address}</code>
+
+━━━━━━━━━━━━━━━━━━━━
+<b>{coin}/USDC</b> ({mode_prefix}-{position_side})
+━━━━━━━━━━━━━━━━━━━━
+
+⚙️ <b>Leverage</b>
+<code>{leverage_display}</code>
+
+🕒 <b>Closed At</b>
+<code>{close_time_display}</code>
+
+🔗 <b>Transaction Hash</b>
+<code>{tx_hash_display}</code>
+
+📈 <b>Realized PnL</b>
+<code>{pnl_sign}{pnl_str}</code> ({pnl_sign}{pnl_percent_str}%)
+
+💳 <b>Position Notional</b>
+<code>${position_value_display}</code>
+
+⚖️ <b>Entry Price</b>
+<code>{entry_price_display}</code>
+
+⚖️ <b>Exit Price</b>
+<code>{close_price_display}</code>
+
+💵 <b>Current Price</b>
+<code>{current_price_display}</code>
+
+💰 <b>Account Equity</b>
+<code>${balance_display}</code>"""
+
     return f"""❌ <b>订单已平仓</b> {pnl_color}
 
 💳 <b>钱包地址</b>
 <code>{address}</code>
 
 ━━━━━━━━━━━━━━━━━━━━
-<b>{coin}/USDC</b> (全仓-{position_side})
+<b>{coin}/USDC</b> ({mode_prefix}-{position_side})
 ━━━━━━━━━━━━━━━━━━━━
 
 ⚙️ <b>杠杆</b>
@@ -794,7 +916,8 @@ def format_order_reduced_message(
     prev_size = _safe_float(previous_position.get("szi"))
     curr_size = _safe_float(current_position.get("szi"))
     is_long = prev_size > 0
-    position_side = "多" if is_long else "空"
+    position_side = _side_label(is_long)
+    mode_prefix = _position_mode_label()
 
     closed_size = abs(prev_size) - abs(curr_size)
     if closed_size <= SIZE_EPSILON:
@@ -835,13 +958,50 @@ def format_order_reduced_message(
     balance_display = format_number(balance, 2)
     current_price_display = format_number(current_price) if current_price > 0 else "N/A"
 
+    if _is_english():
+        return f"""♻️ <b>Position Partially Closed</b> {pnl_color}
+
+💳 <b>Wallet</b>
+<code>{address}</code>
+
+━━━━━━━━━━━━━━━━━━━━
+<b>{coin}/USDC</b> ({mode_prefix}-{position_side})
+━━━━━━━━━━━━━━━━━━━━
+
+⚖️ <b>Entry Price</b>
+<code>{entry_price_display}</code>
+
+⚖️ <b>Close Price</b>
+<code>{close_price_display}</code>
+
+📦 <b>Closed Size</b>
+<code>{closed_size_display}</code>
+
+📦 <b>Remaining Size</b>
+<code>{remaining_size_display}</code>
+
+💳 <b>Closed Notional</b>
+<code>${closed_value_display}</code>
+
+💳 <b>Remaining Notional</b>
+<code>${remaining_value_display}</code>
+
+📈 <b>Realized PnL</b>
+<code>{pnl_sign}{pnl_display}</code>
+
+💵 <b>Current Price</b>
+<code>{current_price_display}</code>
+
+💰 <b>Account Equity</b>
+<code>${balance_display}</code>"""
+
     return f"""♻️ <b>订单部分平仓</b> {pnl_color}
 
 💳 <b>钱包地址</b>
 <code>{address}</code>
 
 ━━━━━━━━━━━━━━━━━━━━
-<b>{coin}/USDC</b> (全仓-{position_side})
+<b>{coin}/USDC</b> ({mode_prefix}-{position_side})
 ━━━━━━━━━━━━━━━━━━━━
 
 ⚖️ <b>开仓均价</b>
@@ -874,6 +1034,17 @@ def format_order_reduced_message(
 
 def format_empty_wallet_message(address: str, balance: float) -> str:
     balance_display = format_number(balance, 2)
+    if _is_english():
+        return f"""ℹ️ <b>Wallet Monitor</b>
+
+💳 <b>Wallet</b>
+<code>{address}</code>
+
+📭 No open positions or historical fills.
+
+💰 <b>Balance</b>
+<code>${balance_display}</code>"""
+
     return f"""ℹ️ <b>钱包监控</b>
 
 💳 <b>钱包地址</b>
@@ -899,24 +1070,38 @@ def _format_wallet_snapshot(
     total_value = sum(abs(_safe_float(pos.get("positionValue"))) for pos in positions.values())
     total_value_display = format_number(total_value, 2)
 
-    sections: List[str] = [
-        "📊 <b>最新持仓快照</b>",
-        "",
-        "🕒 <b>更新时间</b>",
-        f"<code>{snapshot_time_display}</code>",
-        "",
-        "💳 <b>钱包地址</b>",
-        f"<code>{address}</code>",
-        "",
-        "💰 <b>账户权益</b>",
-        f"<code>${balance_display}</code>",
-    ]
+    if _is_english():
+        sections: List[str] = [
+            "📊 <b>Latest Position Snapshot</b>",
+            "",
+            "🕒 <b>Updated At</b>",
+            f"<code>{snapshot_time_display}</code>",
+            "",
+            "💳 <b>Wallet</b>",
+            f"<code>{address}</code>",
+            "",
+            "💰 <b>Account Equity</b>",
+            f"<code>${balance_display}</code>",
+        ]
+    else:
+        sections = [
+            "📊 <b>最新持仓快照</b>",
+            "",
+            "🕒 <b>更新时间</b>",
+            f"<code>{snapshot_time_display}</code>",
+            "",
+            "💳 <b>钱包地址</b>",
+            f"<code>{address}</code>",
+            "",
+            "💰 <b>账户权益</b>",
+            f"<code>${balance_display}</code>",
+        ]
 
     if total_value > 0:
         sections.extend(
             [
                 "",
-                "💼 <b>总持仓价值</b>",
+                "💼 <b>Total Position Notional</b>" if _is_english() else "💼 <b>总持仓价值</b>",
                 f"<code>${total_value_display}</code>",
             ]
         )
@@ -929,7 +1114,8 @@ def _format_wallet_snapshot(
         size = _safe_float(position.get("szi"))
         position_size = abs(size)
         is_long = size > 0
-        position_side = "多" if is_long else "空"
+        position_side = _side_label(is_long)
+        mode_prefix = _position_mode_label()
 
         unrealized_pnl = _safe_float(position.get("unrealizedPnl"))
         pnl_percentage = 0.0
@@ -954,25 +1140,25 @@ def _format_wallet_snapshot(
             [
                 "",
                 "━━━━━━━━━━━━━━━━━━━━",
-                f"<b>{coin}/USDC</b> (全仓-{position_side}) {pnl_color}",
+                f"<b>{coin}/USDC</b> ({mode_prefix}-{position_side}) {pnl_color}",
                 "━━━━━━━━━━━━━━━━━━━━",
                 "",
-                "📦 <b>持仓数量</b>",
+                "📦 <b>Position Size</b>" if _is_english() else "📦 <b>持仓数量</b>",
                 f"<code>{size_display}</code>",
                 "",
-                "⚙️ <b>杠杆</b>",
+                "⚙️ <b>Leverage</b>" if _is_english() else "⚙️ <b>杠杆</b>",
                 f"<code>{leverage_display}</code>",
                 "",
-                "💳 <b>持仓价值</b>",
+                "💳 <b>Position Notional</b>" if _is_english() else "💳 <b>持仓价值</b>",
                 f"<code>${position_value_display}</code>",
                 "",
-                "⚖️ <b>开仓均价</b>",
+                "⚖️ <b>Entry Price</b>" if _is_english() else "⚖️ <b>开仓均价</b>",
                 f"<code>{entry_price_display}</code>",
                 "",
-                "💵 <b>当前价格</b>",
+                "💵 <b>Current Price</b>" if _is_english() else "💵 <b>当前价格</b>",
                 f"<code>{current_price_display}</code>",
                 "",
-                "📈 <b>盈亏</b>",
+                "📈 <b>Unrealized PnL</b>" if _is_english() else "📈 <b>盈亏</b>",
                 f"<code>{pnl_sign}{pnl_display}</code> ({pnl_sign}{pnl_percent_display}%)",
             ]
         )

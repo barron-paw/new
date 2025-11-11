@@ -10,8 +10,11 @@ import useWalletData from '../hooks/useWalletData';
 import AccountMenu from '../components/AccountMenu.jsx';
 import SubscriptionPanel from '../components/SubscriptionPanel.jsx';
 import MonitorConfigPanel from '../components/MonitorConfigPanel.jsx';
+import { useLanguage } from '../context/LanguageContext.jsx';
 
 export function Dashboard() {
+  const { language } = useLanguage();
+  const isEnglish = language === 'en';
   const {
     selectedWallet,
     setSelectedWallet,
@@ -27,7 +30,11 @@ export function Dashboard() {
     <div className="dashboard__header">
       <div>
         <h1>Hyperliquid Monitor</h1>
-        <p>Live positions, balances, and fills for your tracked wallets.</p>
+        <p>
+          {isEnglish
+            ? 'Live positions, balances, and fills for your tracked wallets.'
+            : '实时查看跟踪钱包的持仓、余额与成交明细。'}
+        </p>
       </div>
     </div>
   );
@@ -35,11 +42,20 @@ export function Dashboard() {
   const footer = (
     <div className="dashboard__footer">
       <p>
-        Data polled directly from Hyperliquid public endpoints. Refresh interval 15s. Adjust via{' '}
-        <code>useWalletData</code>.
+        {isEnglish ? (
+          <>
+            Data polled directly from Hyperliquid public endpoints. Refresh interval 15s. Adjust via{' '}
+            <code>useWalletData</code>.
+          </>
+        ) : (
+          <>
+            数据直接来自 Hyperliquid 公共接口，刷新间隔 15 秒，可在 <code>useWalletData</code> 中调整。
+          </>
+        )}
       </p>
       <p>
-        联系邮箱：<a href="mailto:baobangran@gamil.com">baobangran@gamil.com</a>
+        {isEnglish ? 'Contact: ' : '联系邮箱：'}
+        <a href="mailto:baobangran@gamil.com">baobangran@gamil.com</a>
       </p>
     </div>
   );
@@ -57,7 +73,11 @@ export function Dashboard() {
       />
 
       {error ? (
-        <StatusBanner kind="error" title="Unable to fetch data" description={error} />
+        <StatusBanner
+          kind="error"
+          title={isEnglish ? 'Unable to fetch data' : '无法获取数据'}
+          description={error}
+        />
       ) : null}
 
       {loading ? <LoadingIndicator /> : null}
