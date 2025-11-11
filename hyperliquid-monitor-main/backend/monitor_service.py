@@ -205,12 +205,12 @@ class UserMonitor:
 
         # Schedule snapshot every 4 hours
         try:
-        module.schedule.every(4).hours.do(  # type: ignore[attr-defined]
-            lambda: module.send_wallet_snapshot(
-                self.config.wallet_addresses,
-                force=True,
+            module.schedule.every(4).hours.do(  # type: ignore[attr-defined]
+                lambda: module.send_wallet_snapshot(
+                    self.config.wallet_addresses,
+                    force=True,
+                )
             )
-        )
         except Exception as exc:
             logger.error("Failed to schedule snapshot for user %s: %s", self.config.user_id, exc)
 
