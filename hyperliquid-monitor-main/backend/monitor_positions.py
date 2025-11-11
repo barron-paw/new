@@ -1434,7 +1434,12 @@ def _collect_wallet_updates(
     return current_positions, notifications, meta
 
 
-def _process_addresses(addresses: Iterable[str], *, reason: str) -> None:
+def _process_addresses(
+    addresses: Iterable[str],
+    *,
+    reason: str,
+    force: bool = False,
+) -> None:
     addresses = [addr for addr in addresses if addr]
     if not addresses:
         return
@@ -1442,7 +1447,7 @@ def _process_addresses(addresses: Iterable[str], *, reason: str) -> None:
     global _snapshot_initialized
     include_snapshot = reason in {"full position scan", "snapshot"}
     suppress_events = reason in {"full position scan", "snapshot"}
-    force_snapshot = False
+    force_snapshot = force
     if reason == "snapshot":
         force_snapshot = True
     elif reason == "full position scan" and not _snapshot_initialized:
@@ -1577,9 +1582,13 @@ def stop_websocket_monitoring() -> None:
     logger.info("Websocket monitoring stopped")
 
 
-def send_wallet_snapshot(addresses: Optional[Iterable[str]] = None) -> None:
+def send_wallet_snapshot(
+    addresses: Optional[Iterable[str]] = None,
+    *,
+    force: bool = False,
+) -> None:
     target_addresses = tuple(addresses) if addresses else CONFIGURED_ADDRESSES
-    _process_addresses(target_addresses, reason="snapshot")
+    _process_addresses(target_addresses, reason="snapshot", force=force)
 
 
 def monitor_all_wallets() -> None:

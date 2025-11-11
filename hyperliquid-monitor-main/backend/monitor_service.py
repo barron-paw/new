@@ -96,18 +96,21 @@ class UserMonitor:
         wallet_addresses: Tuple[str, ...],
         language: str,
     ) -> None:
-        old_addresses = self.config.wallet_addresses
+        normalized_language = (language or "zh").lower()
+        if normalized_language not in {"zh", "en"}:
+            normalized_language = "zh"
         restart_needed = (
             telegram_bot_token != self.config.telegram_bot_token
             or telegram_chat_id != self.config.telegram_chat_id
             or wallet_addresses != self.config.wallet_addresses
+            or normalized_language != self.config.language
         )
         self.config = _UserConfig(
             user_id=self.config.user_id,
             telegram_bot_token=telegram_bot_token,
             telegram_chat_id=telegram_chat_id,
             wallet_addresses=wallet_addresses,
-            language=language or "zh",
+            language=normalized_language,
         )
         if self._module is not None:
             try:
@@ -202,9 +205,12 @@ class UserMonitor:
 
         # Schedule snapshot every 4 hours
         try:
-            module.schedule.every(4).hours.do(  # type: ignore[attr-defined]
-                lambda: module.send_wallet_snapshot(self.config.wallet_addresses)
+        module.schedule.every(4).hours.do(  # type: ignore[attr-defined]
+            lambda: module.send_wallet_snapshot(
+                self.config.wallet_addresses,
+                force=True,
             )
+        )
         except Exception as exc:
             logger.error("Failed to schedule snapshot for user %s: %s", self.config.user_id, exc)
 
