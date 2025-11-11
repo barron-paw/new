@@ -6,7 +6,7 @@ import { useLanguage } from '../context/LanguageContext.jsx';
 
 function parseAddresses(value) {
   return value
-    .split(/[\n,]/)
+    .split(/[\s,;]+/)
     .map((item) => item.trim())
     .filter(Boolean);
 }

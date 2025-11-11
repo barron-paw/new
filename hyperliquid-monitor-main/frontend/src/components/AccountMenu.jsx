@@ -58,6 +58,7 @@ export default function AccountMenu() {
         walletAddresses: Array.isArray(config.walletAddresses) ? config.walletAddresses : [],
         language: nextLanguage,
       });
+      setLanguage(nextLanguage);
     } catch (error) {
       console.error('Failed to update language preference', error);
     } finally {
