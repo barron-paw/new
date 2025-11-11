@@ -1,0 +1,67 @@
+.wallet-selector {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-lg);
+  margin-bottom: var(--space-xl);
+}
+
+.wallet-selector__input-wrapper {
+  flex: 1;
+}
+
+.wallet-selector__label {
+  display: block;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  margin-bottom: var(--space-xs);
+}
+
+.wallet-selector__input-container {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.wallet-selector__input {
+  flex: 1;
+  min-width: 320px;
+  padding: var(--space-sm) var(--space-md);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-stronger);
+  background: var(--surface-control);
+  color: var(--text-primary);
+  font-family: 'Courier New', monospace;
+  font-size: 0.9rem;
+  transition: border-color 0.2s ease;
+}
+
+.wallet-selector__input:focus {
+  outline: none;
+  border-color: var(--accent-primary);
+}
+
+.wallet-selector__input::placeholder {
+  color: var(--text-muted);
+  opacity: 0.6;
+}
+
+.wallet-selector__refresh {
+  padding: var(--space-sm) var(--space-lg);
+  border-radius: var(--radius-md);
+  background: var(--accent-primary);
+  border: none;
+  color: white;
+  cursor: pointer;
+  transition: background 0.2s ease;
+  white-space: nowrap;
+}
+
+.wallet-selector__refresh:disabled {
+  background: var(--border-subtle);
+  cursor: not-allowed;
+}
+
+.wallet-selector__refresh:not(:disabled):hover {
+  background: var(--accent-primary-strong);
+}
