@@ -115,8 +115,7 @@ class UserMonitor:
             except Exception:
                 logger.debug("Unable to update LANGUAGE for user %s", self.config.user_id)
         if restart_needed:
-            addresses_changed = wallet_addresses != old_addresses
-            self._skip_snapshot_on_start = not addresses_changed
+            self._skip_snapshot_on_start = False
             self.stop()
             self.start()
 
@@ -193,11 +192,6 @@ class UserMonitor:
                 module.monitor_all_wallets()
             except Exception as exc:
                 logger.warning("Initial monitor_all_wallets failed for user %s: %s", self.config.user_id, exc)
-
-            try:
-                module.send_wallet_snapshot(self.config.wallet_addresses)
-            except Exception as exc:
-                logger.warning("Initial snapshot failed for user %s: %s", self.config.user_id, exc)
 
         websocket_thread = threading.Thread(
             target=module.start_websocket_monitoring,

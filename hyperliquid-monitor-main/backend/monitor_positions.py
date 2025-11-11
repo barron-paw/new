@@ -8,6 +8,7 @@ import threading
 import time
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
+from threading import Lock
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
 import requests
@@ -1509,13 +1510,29 @@ def check_position_changes_for_address(address: str) -> None:
     _process_addresses([address], reason="websocket event")
 
 
+_PENDING_WS_CHECKS: Set[str] = set()
+_PENDING_WS_LOCK = threading.Lock()
+
+
 def create_websocket_handler(address: str):
     def handle_event(event: Dict[str, Any]) -> None:
         if _stop_event.is_set() or not isinstance(event, dict):
             return
         data = event.get("data", {})
         if "fills" in data or "orderUpdates" in data:
-            threading.Timer(1.0, lambda: check_position_changes_for_address(address)).start()
+            with _PENDING_WS_LOCK:
+                if address in _PENDING_WS_CHECKS:
+                    return
+                _PENDING_WS_CHECKS.add(address)
+
+            def _run_check() -> None:
+                try:
+                    check_position_changes_for_address(address)
+                finally:
+                    with _PENDING_WS_LOCK:
+                        _PENDING_WS_CHECKS.discard(address)
+
+            threading.Timer(1.0, _run_check).start()
 
     return handle_event
 
