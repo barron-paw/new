@@ -53,8 +53,11 @@ class UserMonitor:
         self._stop_event = threading.Event()
         self._module = None
         self._state_module = None
+        self._skip_snapshot_on_start = False
 
     def start(self) -> None:
+        skip_snapshot = self._skip_snapshot_on_start
+        self._skip_snapshot_on_start = False
         if self._thread and self._thread.is_alive():
             return
         if not self.config.wallet_addresses:
@@ -65,7 +68,7 @@ class UserMonitor:
             return
 
         self._stop_event.clear()
-        self._thread = threading.Thread(target=self._run, name=f"user-monitor-{self.config.user_id}", daemon=True)
+        self._thread = threading.Thread(target=self._run, args=(skip_snapshot,), name=f"user-monitor-{self.config.user_id}", daemon=True)
         self._thread.start()
         logger.info("Started monitor thread for user %s", self.config.user_id)
 
@@ -93,6 +96,7 @@ class UserMonitor:
         wallet_addresses: Tuple[str, ...],
         language: str,
     ) -> None:
+        old_addresses = self.config.wallet_addresses
         restart_needed = (
             telegram_bot_token != self.config.telegram_bot_token
             or telegram_chat_id != self.config.telegram_chat_id
@@ -111,6 +115,8 @@ class UserMonitor:
             except Exception:
                 logger.debug("Unable to update LANGUAGE for user %s", self.config.user_id)
         if restart_needed:
+            addresses_changed = wallet_addresses != old_addresses
+            self._skip_snapshot_on_start = not addresses_changed
             self.stop()
             self.start()
 
@@ -178,19 +184,20 @@ class UserMonitor:
         except Exception as exc:
             logger.debug("State store refresh failed for user %s: %s", self.config.user_id, exc)
 
-    def _start_monitoring(self) -> None:
+    def _start_monitoring(self, skip_snapshot: bool = False) -> None:
         module = self._module
         assert module is not None
 
-        try:
-            module.monitor_all_wallets()
-        except Exception as exc:
-            logger.warning("Initial monitor_all_wallets failed for user %s: %s", self.config.user_id, exc)
+        if not skip_snapshot:
+            try:
+                module.monitor_all_wallets()
+            except Exception as exc:
+                logger.warning("Initial monitor_all_wallets failed for user %s: %s", self.config.user_id, exc)
 
-        try:
-            module.send_wallet_snapshot(self.config.wallet_addresses)
-        except Exception as exc:
-            logger.warning("Initial snapshot failed for user %s: %s", self.config.user_id, exc)
+            try:
+                module.send_wallet_snapshot(self.config.wallet_addresses)
+            except Exception as exc:
+                logger.warning("Initial snapshot failed for user %s: %s", self.config.user_id, exc)
 
         websocket_thread = threading.Thread(
             target=module.start_websocket_monitoring,
@@ -217,12 +224,12 @@ class UserMonitor:
                 logger.error("Scheduler loop error for user %s: %s", self.config.user_id, exc)
             self._stop_event.wait(60)
 
-    def _run(self) -> None:
+    def _run(self, skip_snapshot: bool = False) -> None:
         start_time = datetime.utcnow()
         try:
             self._prepare_modules()
             self._configure_module()
-            self._start_monitoring()
+            self._start_monitoring(skip_snapshot=skip_snapshot)
             self._scheduler_loop()
         except Exception as exc:  # pragma: no cover - defensive logging
             logger.error("Monitor loop crashed for user %s: %s", self.config.user_id, exc)

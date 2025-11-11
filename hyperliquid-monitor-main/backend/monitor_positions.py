@@ -488,9 +488,7 @@ def get_current_prices() -> Dict[str, float]:
     except Exception as exc:
         logger.error("Error fetching current prices: %s", exc)
         raise
-    if mids is None:
-        raise TemporaryAPIError("Current prices unavailable")
-    if not mids:
+    if mids is None or not mids:
         raise TemporaryAPIError("Current prices unavailable")
     return {coin: float(price) for coin, price in mids.items()}
 
@@ -1248,7 +1246,10 @@ def _collect_wallet_updates(
     force_snapshot: bool = False,
     suppress_events: bool = False,
 ) -> Tuple[Dict[str, Dict], List[Tuple[str, str, str]], Dict[str, Any]]:
-    user_state = get_positions(address)
+    try:
+        user_state = get_positions(address)
+    except TemporaryAPIError as exc:
+        raise TemporaryAPIError(str(exc))
     positions = user_state.get("assetPositions", []) if user_state else []
     fills = get_trade_history(address)
     balance = _extract_account_value(user_state)

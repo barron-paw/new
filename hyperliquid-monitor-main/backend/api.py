@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import os
+import secrets
 import smtplib
 import threading
 import time
@@ -30,6 +31,8 @@ from .database import (
     list_users,
     update_user,
     upsert_user_config,
+    upsert_email_verification,
+    consume_email_verification,
 )
 from .monitor_positions import (
     CONFIGURED_ADDRESSES,
@@ -219,6 +222,7 @@ class WalletMetricsPayload(BaseModel):
 class RegisterRequest(BaseModel):
     email: EmailStr
     password: str
+    verification_code: str
 
 
 class LoginRequest(BaseModel):
@@ -228,6 +232,10 @@ class LoginRequest(BaseModel):
 
 class AuthToken(BaseModel):
     token: str
+
+
+class VerificationRequest(BaseModel):
+    email: EmailStr
 
 
 class UserInfo(BaseModel):
@@ -264,6 +272,10 @@ def _format_side(size: float) -> str:
     if size < 0:
         return "short"
     return "flat"
+
+
+def _generate_verification_code() -> str:
+    return f"{secrets.randbelow(1_000_000):06d}"
 
 
 def _build_position_payload(position: Dict[str, Any], mark_prices: Dict[str, float]) -> PositionPayload:
@@ -468,9 +480,26 @@ def wallet_metrics(address: str) -> WalletMetricsPayload:
     )
 
 
+@app.post("/api/auth/request_verification")
+def request_email_verification(payload: VerificationRequest) -> Dict[str, str]:
+    email = payload.email.lower()
+    code = _generate_verification_code()
+    expires_at = (datetime.utcnow() + timedelta(minutes=15)).isoformat()
+    upsert_email_verification(email, code, expires_at)
+    subject = "Hyperliquid Monitor 邮箱验证码"
+    body = (
+        "您好！\n\n您的邮箱验证码为：\n\n"
+        f"    {code}\n\n验证码 15 分钟内有效，请勿泄露给他人。"
+    )
+    _send_email(email, subject, body)
+    return {"detail": "Verification code sent"}
+
+
 @app.post("/api/auth/register", response_model=AuthResponse)
 def register(payload: RegisterRequest) -> AuthResponse:
     email = payload.email.lower()
+    if not consume_email_verification(email, payload.verification_code):
+        raise HTTPException(status_code=400, detail="Invalid or expired verification code")
     if len(payload.password) < 6:
         raise HTTPException(status_code=400, detail="Password must be at least 6 characters long")
     if get_user_by_email(email):

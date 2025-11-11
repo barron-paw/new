@@ -38,6 +38,15 @@ def init_db() -> None:
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS email_verifications (
+                email TEXT PRIMARY KEY,
+                code TEXT NOT NULL,
+                expires_at TEXT NOT NULL
+            )
+            """
+        )
         # Ensure newer columns exist for legacy databases
         cursor = conn.execute("PRAGMA table_info(user_configs)")
         existing_columns = {row[1] for row in cursor.fetchall()}
@@ -174,6 +183,43 @@ def update_user(user_id: int, **fields: Any) -> None:
     with get_db() as conn:
         conn.execute(f"UPDATE users SET {columns} WHERE id = ?", values)
         conn.commit()
+
+
+def upsert_email_verification(email: str, code: str, expires_at: str) -> None:
+    with get_db() as conn:
+        conn.execute(
+            """
+            INSERT INTO email_verifications (email, code, expires_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(email) DO UPDATE SET
+                code = excluded.code,
+                expires_at = excluded.expires_at
+            """,
+            (email.lower(), code, expires_at),
+        )
+        conn.commit()
+
+
+def consume_email_verification(email: str, code: str) -> bool:
+    with get_db() as conn:
+        cursor = conn.execute(
+            "SELECT code, expires_at FROM email_verifications WHERE email = ?",
+            (email.lower(),),
+        )
+        row = cursor.fetchone()
+        if not row:
+            return False
+        stored_code = row[0]
+        expires_at = row[1]
+        if stored_code != code:
+            return False
+        try:
+            expiry = datetime.fromisoformat(expires_at)
+        except ValueError:
+            return False
+        conn.execute("DELETE FROM email_verifications WHERE email = ?", (email.lower(),))
+        conn.commit()
+        return expiry >= datetime.utcnow()
 
 
 # Initialise database when module is imported
