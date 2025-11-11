@@ -71,7 +71,7 @@ export default function MonitorConfigPanel() {
       const payload = {
         telegramBotToken: form.telegramBotToken.trim() || null,
         telegramChatId: form.telegramChatId.trim() || null,
-        walletAddresses: parseAddresses(form.walletAddresses),
+        walletAddresses: parseAddresses(form.walletAddresses).slice(0, 2),
         language: form.language,
       };
       const response = await updateMonitorConfig(payload);
@@ -158,8 +158,8 @@ export default function MonitorConfigPanel() {
                 />
                 <small>
                   {isEnglish
-                    ? 'One address per line (or separated by commas). Takes effect within 30 seconds after saving.'
-                    : '每行一个地址，或使用逗号分隔；保存后 30 秒内生效。'}
+                    ? 'One address per line (or separated by commas). Up to 2 wallets are monitored.'
+                    : '每行一个地址，最多监控 2 个地址。'}
                 </small>
               </label>
             </div>

@@ -1,5 +1,6 @@
 import importlib.util
 import logging
+import re
 import sys
 import threading
 from dataclasses import dataclass
@@ -248,6 +249,21 @@ class MonitorRegistry:
         self._lock = threading.Lock()
         self._monitors: Dict[int, UserMonitor] = {}
 
+    @staticmethod
+    def _normalize_addresses(addresses: Iterable[str]) -> Tuple[str, ...]:
+        tokens = []
+        seen = set()
+        for entry in addresses:
+            if not entry:
+                continue
+            for token in re.split(r"[\s,;]+", entry.strip()):
+                token = token.strip().lower()
+                if not token or token in seen:
+                    continue
+                tokens.append(token)
+                seen.add(token)
+        return tuple(tokens)
+
     def configure_user(
         self,
         user_id: int,
@@ -257,7 +273,8 @@ class MonitorRegistry:
         wallet_addresses: Iterable[str],
         language: str,
     ) -> None:
-        wallets_tuple = tuple(addr.strip() for addr in wallet_addresses if addr.strip())
+        wallets_tuple = self._normalize_addresses(wallet_addresses)
+        wallets_tuple = wallets_tuple[:2]
         token = (telegram_bot_token or "").strip()
         chat_id = (telegram_chat_id or "").strip()
         lang = (language or "zh").lower()

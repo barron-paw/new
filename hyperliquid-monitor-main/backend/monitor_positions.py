@@ -62,6 +62,10 @@ info_client: Info = Info()
 SIZE_EPSILON = 1e-9
 
 
+class TemporaryAPIError(Exception):
+    """Raised when upstream data is temporarily unavailable."""
+
+
 _raw_prefix = Path(__file__).stem.upper()
 if _raw_prefix and _raw_prefix[0].isdigit():
     _raw_prefix = f"SCRIPT_{_raw_prefix}"
@@ -433,21 +437,24 @@ def _extract_account_value(user_state: Dict[str, Any]) -> float:
         return _safe_float(margin_summary.get("totalRawUsd"))
     return 0.0
 
-def retry_api_call(func, *args, **kwargs):
+def retry_api_call(func, *args, fallback=None, **kwargs):
     for attempt in range(MAX_RETRIES):
         try:
             return func(*args, **kwargs)
         except (ClientError, ServerError) as exc:
+            target = args[0] if args else "<unknown>"
+            logger.warning("API call returned error for %s: %s", target, exc)
+            if fallback is not None:
+                return fallback
             if attempt == MAX_RETRIES - 1:
-                logger.error("API call failed after %s attempts: %s", MAX_RETRIES, exc)
-                raise
+                return None
             wait_time = RETRY_DELAY * (2 ** attempt)
             logger.warning(
-                "API call failed (attempt %s/%s), retrying in %ss: %s",
+                "Retrying API call for %s in %ss (attempt %s/%s)",
+                target,
+                wait_time,
                 attempt + 1,
                 MAX_RETRIES,
-                wait_time,
-                exc,
             )
             time.sleep(wait_time)
         except Exception as exc:  # pragma: no cover - unexpected path
@@ -461,15 +468,14 @@ def get_positions(address: str) -> Dict:
     except Exception as exc:
         logger.error("Error fetching positions for %s: %s", address, exc)
         raise
-    if not user_state:
-        logger.warning("Empty response for positions from %s", address)
-        return {}
-    return user_state
+    if user_state is None:
+        raise TemporaryAPIError(f"Positions unavailable for {address}")
+    return user_state or {}
 
 
 def get_trade_history(address: str) -> List[Dict]:
     try:
-        fills = retry_api_call(info_client.user_fills, address)
+        fills = retry_api_call(info_client.user_fills, address, fallback=[])
     except Exception as exc:
         logger.error("Error fetching trade history for %s: %s", address, exc)
         return []
@@ -482,9 +488,10 @@ def get_current_prices() -> Dict[str, float]:
     except Exception as exc:
         logger.error("Error fetching current prices: %s", exc)
         raise
+    if mids is None:
+        raise TemporaryAPIError("Current prices unavailable")
     if not mids:
-        logger.error("Empty response for current prices")
-        return {}
+        raise TemporaryAPIError("Current prices unavailable")
     return {coin: float(price) for coin, price in mids.items()}
 
 
@@ -1442,6 +1449,9 @@ def _process_addresses(addresses: Iterable[str], *, reason: str) -> None:
 
     try:
         current_prices = get_current_prices()
+    except TemporaryAPIError as exc:
+        logger.warning("Skipping %s due to upstream price error: %s", reason, exc)
+        return
     except Exception as exc:
         logger.error("Failed to fetch current prices during %s: %s", reason, exc)
         return
@@ -1468,6 +1478,9 @@ def _process_addresses(addresses: Iterable[str], *, reason: str) -> None:
                     force_snapshot=force_snapshot or not meta.get("last_snapshot_hash"),
                     suppress_events=suppress_events,
                 )
+            except TemporaryAPIError as exc:
+                logger.warning("Skipping wallet %s during %s due to temporary API error: %s", address, reason, exc)
+                continue
             except Exception as exc:
                 logger.error("Error processing wallet %s during %s: %s", address, reason, exc)
                 continue
