@@ -5,6 +5,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from .crypto_utils import decrypt_value, encrypt_value
+
 DB_PATH = Path(__file__).resolve().parent / "data.db"
 
 
@@ -34,6 +36,18 @@ def init_db() -> None:
                 wallet_addresses TEXT,
                 updated_at TEXT,
                 language TEXT DEFAULT 'zh',
+                binance_follow_enabled INTEGER DEFAULT 0,
+                binance_wallet_address TEXT,
+                binance_mode TEXT,
+                binance_amount REAL,
+                binance_stop_loss_amount REAL,
+                binance_max_position REAL,
+                binance_min_order_size REAL,
+                binance_api_key TEXT,
+                binance_api_secret TEXT,
+                binance_baseline_balance REAL,
+                binance_follow_status TEXT DEFAULT 'disabled',
+                binance_follow_stop_reason TEXT,
                 FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
             )
             """
@@ -50,8 +64,24 @@ def init_db() -> None:
         # Ensure newer columns exist for legacy databases
         cursor = conn.execute("PRAGMA table_info(user_configs)")
         existing_columns = {row[1] for row in cursor.fetchall()}
-        if "language" not in existing_columns:
-            conn.execute("ALTER TABLE user_configs ADD COLUMN language TEXT DEFAULT 'zh'")
+        required_columns = {
+            "language": "TEXT DEFAULT 'zh'",
+            "binance_follow_enabled": "INTEGER DEFAULT 0",
+            "binance_wallet_address": "TEXT",
+            "binance_mode": "TEXT",
+            "binance_amount": "REAL",
+            "binance_stop_loss_amount": "REAL",
+            "binance_max_position": "REAL",
+            "binance_min_order_size": "REAL",
+            "binance_api_key": "TEXT",
+            "binance_api_secret": "TEXT",
+            "binance_baseline_balance": "REAL",
+            "binance_follow_status": "TEXT DEFAULT 'disabled'",
+            "binance_follow_stop_reason": "TEXT",
+        }
+        for column, ddl in required_columns.items():
+            if column not in existing_columns:
+                conn.execute(f"ALTER TABLE user_configs ADD COLUMN {column} {ddl}")
         conn.commit()
 
 
@@ -172,6 +202,163 @@ def upsert_user_config(
         )
         conn.commit()
     return get_user_config(user_id)
+
+
+def get_binance_follow_config(user_id: int) -> Dict[str, Any]:
+    with get_db() as conn:
+        cursor = conn.execute(
+            """
+            SELECT
+                binance_follow_enabled,
+                binance_wallet_address,
+                binance_mode,
+                binance_amount,
+                binance_stop_loss_amount,
+                binance_max_position,
+                binance_min_order_size,
+                binance_api_key,
+                binance_api_secret,
+                binance_baseline_balance,
+                binance_follow_status,
+                binance_follow_stop_reason
+            FROM user_configs
+            WHERE user_id = ?
+            """,
+            (user_id,),
+        )
+        row = cursor.fetchone()
+    if not row:
+        return {
+            "enabled": False,
+            "wallet_address": "",
+            "mode": "fixed",
+            "amount": 0.0,
+            "stop_loss_amount": 0.0,
+            "max_position": 0.0,
+            "min_order_size": 0.0,
+            "api_key": None,
+            "api_secret": None,
+            "baseline_balance": None,
+            "status": "disabled",
+            "stop_reason": None,
+        }
+    return {
+        "enabled": bool(row["binance_follow_enabled"]),
+        "wallet_address": row["binance_wallet_address"] or "",
+        "mode": (row["binance_mode"] or "fixed").lower(),
+        "amount": row["binance_amount"] or 0.0,
+        "stop_loss_amount": row["binance_stop_loss_amount"] or 0.0,
+        "max_position": row["binance_max_position"] or 0.0,
+        "min_order_size": row["binance_min_order_size"] or 0.0,
+        "api_key": decrypt_value(row["binance_api_key"]),
+        "api_secret": decrypt_value(row["binance_api_secret"]),
+        "baseline_balance": row["binance_baseline_balance"],
+        "status": row["binance_follow_status"] or "disabled",
+        "stop_reason": row["binance_follow_stop_reason"],
+    }
+
+
+def upsert_binance_follow_config(
+    user_id: int,
+    *,
+    enabled: bool,
+    wallet_address: Optional[str],
+    mode: str,
+    amount: float,
+    stop_loss_amount: float,
+    max_position: float,
+    min_order_size: float,
+    api_key: Optional[str],
+    api_secret: Optional[str],
+    baseline_balance: Optional[float],
+    status: Optional[str] = None,
+    stop_reason: Optional[str] = None,
+) -> Dict[str, Any]:
+    wallet_address = (wallet_address or "").strip().lower()
+    normalized_mode = mode.lower() if mode in {"fixed", "percentage"} else "fixed"
+    with get_db() as conn:
+        conn.execute(
+            """
+            INSERT INTO user_configs (
+                user_id,
+                binance_follow_enabled,
+                binance_wallet_address,
+                binance_mode,
+                binance_amount,
+                binance_stop_loss_amount,
+                binance_max_position,
+                binance_min_order_size,
+                binance_api_key,
+                binance_api_secret,
+                binance_baseline_balance,
+                binance_follow_status,
+                binance_follow_stop_reason
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(user_id) DO UPDATE SET
+                binance_follow_enabled = excluded.binance_follow_enabled,
+                binance_wallet_address = excluded.binance_wallet_address,
+                binance_mode = excluded.binance_mode,
+                binance_amount = excluded.binance_amount,
+                binance_stop_loss_amount = excluded.binance_stop_loss_amount,
+                binance_max_position = excluded.binance_max_position,
+                binance_min_order_size = excluded.binance_min_order_size,
+                binance_api_key = excluded.binance_api_key,
+                binance_api_secret = excluded.binance_api_secret,
+                binance_baseline_balance = excluded.binance_baseline_balance,
+                binance_follow_status = excluded.binance_follow_status,
+                binance_follow_stop_reason = excluded.binance_follow_stop_reason
+            """,
+            (
+                user_id,
+                1 if enabled else 0,
+                wallet_address or None,
+                normalized_mode,
+                amount,
+                stop_loss_amount,
+                max_position,
+                min_order_size,
+                encrypt_value(api_key),
+                encrypt_value(api_secret),
+                baseline_balance,
+                status or ("active" if enabled else "disabled"),
+                stop_reason,
+            ),
+        )
+        conn.commit()
+    return get_binance_follow_config(user_id)
+
+
+def update_binance_follow_status(
+    user_id: int,
+    *,
+    enabled: Optional[bool] = None,
+    status: Optional[str] = None,
+    stop_reason: Optional[str] = None,
+    baseline_balance: Optional[float] = None,
+) -> None:
+    assignments = []
+    values: List[Any] = []
+    if enabled is not None:
+        assignments.append("binance_follow_enabled = ?")
+        values.append(1 if enabled else 0)
+    if status is not None:
+        assignments.append("binance_follow_status = ?")
+        values.append(status)
+    if stop_reason is not None:
+        assignments.append("binance_follow_stop_reason = ?")
+        values.append(stop_reason)
+    if baseline_balance is not None:
+        assignments.append("binance_baseline_balance = ?")
+        values.append(baseline_balance)
+    if not assignments:
+        return
+    values.append(user_id)
+    with get_db() as conn:
+        conn.execute(
+            f"UPDATE user_configs SET {', '.join(assignments)} WHERE user_id = ?",
+            values,
+        )
+        conn.commit()
 
 
 def update_user(user_id: int, **fields: Any) -> None:

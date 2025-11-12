@@ -1,3 +1,4 @@
+import copy
 from ast import literal_eval
 import hashlib
 import logging
@@ -1210,6 +1211,8 @@ def send_telegram_message(message: str) -> bool:
 
 
 _STATE_STORE_ALERT_REGISTERED = False
+EVENT_PROCESSOR = None  # type: ignore
+USER_ID = None  # type: ignore
 
 
 def _ensure_state_store_alerts() -> None:
@@ -1257,6 +1260,7 @@ def _collect_wallet_updates(
 
     current_positions: Dict[str, Dict] = {}
     notifications: List[Tuple[str, str, str]] = []
+    trade_events: List[Dict[str, Any]] = []
     current_coins: Set[str] = set()
 
     coins_meta = meta.setdefault(STATE_META_COINS_KEY, {})
@@ -1297,6 +1301,16 @@ def _collect_wallet_updates(
                         avg_price = _calculate_order_average_price(coin, reduce_fill, fills)
                         if avg_price > 0:
                             trade_details["price"] = avg_price
+                        event_payload = {
+                            "event_type": "reduced",
+                            "address": address,
+                            "coin": coin,
+                            "trade_details": dict(trade_details),
+                            "previous_position": copy.deepcopy(previous_position),
+                            "current_position": copy.deepcopy(position_data),
+                            "balance": balance,
+                        }
+                        trade_events.append(event_payload)
                         if not suppress_events:
                             message = format_order_reduced_message(
                                 address,
@@ -1318,13 +1332,23 @@ def _collect_wallet_updates(
             elif prev_sign != 0 and curr_sign != 0 and prev_sign != curr_sign:
                 close_fill = _find_relevant_fill(coin, fills, event_type="close")
                 close_event_id = _make_event_id("close", coin, close_fill, previous_position)
-                if coin_meta.get("last_close_id") != close_event_id:
+                    if coin_meta.get("last_close_id") != close_event_id:
                     trade_details = _build_trade_details(previous_position, close_fill)
                     avg_price = _compute_full_close_average_price(coin, fills, previous_position)
                     if avg_price <= 0:
                         avg_price = _calculate_order_average_price(coin, close_fill, fills)
                     if avg_price > 0:
                         trade_details["price"] = avg_price
+                    event_payload = {
+                        "event_type": "closed",
+                        "address": address,
+                        "coin": coin,
+                        "trade_details": dict(trade_details),
+                        "previous_position": copy.deepcopy(previous_position),
+                        "current_position": None,
+                        "balance": balance,
+                    }
+                    trade_events.append(event_payload)
                     if not suppress_events:
                         message = format_order_closed_message(
                             address,
@@ -1358,6 +1382,16 @@ def _collect_wallet_updates(
             avg_price = _calculate_order_average_price(coin, open_fill, fills)
             if avg_price > 0:
                 trade_details["price"] = avg_price
+        event_payload = {
+            "event_type": "opened",
+            "address": address,
+            "coin": coin,
+            "trade_details": dict(trade_details),
+            "previous_position": copy.deepcopy(previous_position) if previous_position else None,
+            "current_position": copy.deepcopy(position_data),
+            "balance": balance,
+        }
+        trade_events.append(event_payload)
         if not suppress_events:
             message = format_order_placed_message(
                 address,
@@ -1387,6 +1421,16 @@ def _collect_wallet_updates(
             avg_price = _calculate_order_average_price(coin, close_fill, fills)
         if avg_price > 0:
             trade_details["price"] = avg_price
+        event_payload = {
+            "event_type": "closed",
+            "address": address,
+            "coin": coin,
+            "trade_details": dict(trade_details),
+            "previous_position": copy.deepcopy(previous_position),
+            "current_position": None,
+            "balance": balance,
+        }
+        trade_events.append(event_payload)
         if not suppress_events:
             message = format_order_closed_message(
                 address,
@@ -1431,7 +1475,7 @@ def _collect_wallet_updates(
                 notifications.insert(0, ("snapshot", "", snapshot_message))
             meta["last_snapshot_hash"] = snapshot_hash
 
-    return current_positions, notifications, meta
+    return current_positions, notifications, meta, trade_events
 
 
 def _process_addresses(
@@ -1464,6 +1508,7 @@ def _process_addresses(
         return
 
     pending_notifications: List[Tuple[str, str, str, str]] = []
+    pending_events: List[Dict[str, Any]] = []
 
     with _STATE_LOCK:
         previous_state = load_position_state()
@@ -1476,7 +1521,7 @@ def _process_addresses(
             meta = _normalize_meta(raw_meta)
 
             try:
-                current_positions, notifications, meta = _collect_wallet_updates(
+                current_positions, notifications, meta, trade_events = _collect_wallet_updates(
                     address,
                     current_prices=current_prices,
                     previous_positions=previous_positions,
@@ -1495,8 +1540,21 @@ def _process_addresses(
             updated_state[address] = _compose_state_entry(current_positions, meta)
             for event_type, coin, message in notifications:
                 pending_notifications.append((address, event_type, coin, message))
+            for trade_event in trade_events:
+                trade_event["address"] = address
+                pending_events.append(trade_event)
 
         save_position_state(updated_state)
+
+    event_processor = globals().get("EVENT_PROCESSOR")
+    user_id = globals().get("USER_ID")
+    if callable(event_processor) and user_id is not None:
+        for event_payload in pending_events:
+            event_payload.setdefault("user_id", user_id)
+            try:
+                event_processor(event_payload)
+            except Exception as exc:  # pragma: no cover - defensive
+                logger.error("用户 %s 事件分发失败: %s", user_id, exc)
 
     for address, event_type, coin, message in pending_notifications:
         if send_telegram_message(message):

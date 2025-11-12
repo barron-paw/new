@@ -7,7 +7,7 @@ import threading
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Iterable, Optional, Tuple
+from typing import Any, Dict, Iterable, Optional, Tuple
 
 try:
     import schedule  # type: ignore
@@ -194,6 +194,16 @@ class UserMonitor:
         module._snapshot_initialized = False  # type: ignore[attr-defined]
         module.schedule = _SchedulerWrapper()  # type: ignore[attr-defined]
         module.LANGUAGE = getattr(self.config, "language", "zh")  # type: ignore[attr-defined]
+        module.USER_ID = self.config.user_id  # type: ignore[attr-defined]
+        try:
+            from .binance_follow_service import dispatch_trade_event
+
+            def _event_processor(event: Dict[str, Any], user_id: int = self.config.user_id) -> None:
+                dispatch_trade_event(user_id, event)
+
+            module.EVENT_PROCESSOR = _event_processor  # type: ignore[attr-defined]
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.debug("无法注入 Binance 事件处理器：%s", exc)
 
         # Refresh state store configuration to pick custom path/env
         try:

@@ -11,7 +11,7 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from email.header import Header
 from email.message import EmailMessage
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Literal
 
 import bcrypt
 import jwt
@@ -33,6 +33,8 @@ from .database import (
     upsert_user_config,
     upsert_email_verification,
     consume_email_verification,
+    get_binance_follow_config,
+    upsert_binance_follow_config,
 )
 from .monitor_positions import (
     CONFIGURED_ADDRESSES,
@@ -52,6 +54,11 @@ from .monitor_service import (
     configure_user_monitor,
     initialise_monitors_from_db,
     shutdown_monitors,
+)
+from .binance_follow_service import (
+    configure_user_follow as configure_binance_follow,
+    initialise_followers_from_db,
+    shutdown_followers,
 )
 
 
@@ -152,6 +159,26 @@ def _ensure_monitor_access(user: Dict[str, Any]) -> Dict[str, Any]:
     if info["can_access_monitor"]:
         return info
     raise HTTPException(status_code=402, detail="Subscription or trial required to access monitor configuration")
+
+
+def _build_binance_response(record: Dict[str, Any]) -> BinanceFollowConfigResponse:
+    mode = (record.get("mode") or "fixed").lower()
+    if mode not in {"fixed", "percentage"}:
+        mode = "fixed"
+    return BinanceFollowConfigResponse(
+        enabled=bool(record.get("enabled")),
+        wallet_address=(record.get("wallet_address") or None),
+        mode=mode,
+        amount=float(record.get("amount") or 0.0),
+        stop_loss_amount=float(record.get("stop_loss_amount") or 0.0),
+        max_position=float(record.get("max_position") or 0.0),
+        min_order_size=float(record.get("min_order_size") or 0.0),
+        has_api_key=bool(record.get("api_key")),
+        has_api_secret=bool(record.get("api_secret")),
+        baseline_balance=record.get("baseline_balance"),
+        status=record.get("status"),
+        stop_reason=record.get("stop_reason"),
+    )
 
 
 class PositionPayload(BaseModel):
@@ -266,6 +293,40 @@ class MonitorConfig(BaseModel):
     language: str = Field("zh", alias="language")
     uses_default_bot: bool = Field(False, alias="usesDefaultBot")
     default_bot_username: Optional[str] = Field(None, alias="defaultBotUsername")
+
+    class Config:
+        populate_by_name = True
+
+
+class BinanceFollowConfigResponse(BaseModel):
+    enabled: bool = False
+    wallet_address: Optional[str] = Field(None, alias="walletAddress")
+    mode: Literal["fixed", "percentage"] = "fixed"
+    amount: float = 0.0
+    stop_loss_amount: float = Field(0.0, alias="stopLossAmount")
+    max_position: float = Field(0.0, alias="maxPosition")
+    min_order_size: float = Field(0.0, alias="minOrderSize")
+    has_api_key: bool = Field(False, alias="hasApiKey")
+    has_api_secret: bool = Field(False, alias="hasApiSecret")
+    baseline_balance: Optional[float] = Field(None, alias="baselineBalance")
+    status: Optional[str] = Field(None, alias="status")
+    stop_reason: Optional[str] = Field(None, alias="stopReason")
+
+    class Config:
+        populate_by_name = True
+
+
+class BinanceFollowConfigRequest(BaseModel):
+    enabled: bool = False
+    wallet_address: Optional[str] = Field(None, alias="walletAddress")
+    mode: Literal["fixed", "percentage"] = "fixed"
+    amount: float = 0.0
+    stop_loss_amount: float = Field(0.0, alias="stopLossAmount")
+    max_position: float = Field(0.0, alias="maxPosition")
+    min_order_size: float = Field(0.0, alias="minOrderSize")
+    api_key: Optional[str] = Field(None, alias="apiKey")
+    api_secret: Optional[str] = Field(None, alias="apiSecret")
+    reset_credentials: bool = Field(False, alias="resetCredentials")
 
     class Config:
         populate_by_name = True
@@ -425,11 +486,13 @@ app.add_middleware(
 def startup_event() -> None:
     _start_scheduler()
     initialise_monitors_from_db()
+    initialise_followers_from_db()
 
 
 @app.on_event("shutdown")
 def shutdown_event() -> None:
     shutdown_monitors()
+    shutdown_followers()
 
 
 @app.get("/api/health")
@@ -618,6 +681,66 @@ def update_monitor_config(
         uses_default_bot=uses_default,
         default_bot_username=DEFAULT_TELEGRAM_BOT_USERNAME or None,
     )
+
+
+@app.get("/api/binance_follow", response_model=BinanceFollowConfigResponse)
+def fetch_binance_follow_config(
+    current_user: Dict[str, Any] = Depends(_require_current_user),
+) -> BinanceFollowConfigResponse:
+    _ensure_monitor_access(current_user)
+    record = get_binance_follow_config(current_user["id"])
+    record["enabled"] = record.get("enabled", False)
+    return _build_binance_response(record)
+
+
+@app.post("/api/binance_follow", response_model=BinanceFollowConfigResponse)
+def save_binance_follow_config(
+    payload: BinanceFollowConfigRequest,
+    current_user: Dict[str, Any] = Depends(_require_current_user),
+) -> BinanceFollowConfigResponse:
+    _ensure_monitor_access(current_user)
+    existing = get_binance_follow_config(current_user["id"])
+
+    api_key = (payload.api_key or "").strip()
+    api_secret = (payload.api_secret or "").strip()
+
+    if payload.reset_credentials:
+        api_key = ""
+        api_secret = ""
+
+    if not api_key:
+        api_key = existing.get("api_key") or ""
+    if not api_secret:
+        api_secret = existing.get("api_secret") or ""
+
+    if payload.enabled and (not api_key or not api_secret):
+        raise HTTPException(status_code=400, detail="Binance API Key 与 Secret 必须同时填写。")
+
+    mode = payload.mode if payload.mode in {"fixed", "percentage"} else "fixed"
+    amount = max(payload.amount, 0.0)
+    stop_loss_amount = max(payload.stop_loss_amount, 0.0)
+    max_position = max(payload.max_position, 0.0)
+    min_order_size = max(payload.min_order_size, 0.0)
+
+    enabled_flag = payload.enabled and bool(api_key and api_secret)
+
+    record = upsert_binance_follow_config(
+        current_user["id"],
+        enabled=enabled_flag,
+        wallet_address=(payload.wallet_address or "").lower(),
+        mode=mode,
+        amount=amount,
+        stop_loss_amount=stop_loss_amount,
+        max_position=max_position,
+        min_order_size=min_order_size,
+        api_key=api_key or None,
+        api_secret=api_secret or None,
+        baseline_balance=existing.get("baseline_balance") if enabled_flag else None,
+        status=None,
+        stop_reason=None,
+    )
+    configure_binance_follow(current_user["id"], record)
+    return _build_binance_response(record)
 
 
 def _topic_to_address(topic: str) -> str:
