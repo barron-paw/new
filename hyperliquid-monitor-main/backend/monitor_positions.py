@@ -1332,7 +1332,7 @@ def _collect_wallet_updates(
             elif prev_sign != 0 and curr_sign != 0 and prev_sign != curr_sign:
                 close_fill = _find_relevant_fill(coin, fills, event_type="close")
                 close_event_id = _make_event_id("close", coin, close_fill, previous_position)
-                    if coin_meta.get("last_close_id") != close_event_id:
+                if coin_meta.get("last_close_id") != close_event_id:
                     trade_details = _build_trade_details(previous_position, close_fill)
                     avg_price = _compute_full_close_average_price(coin, fills, previous_position)
                     if avg_price <= 0:

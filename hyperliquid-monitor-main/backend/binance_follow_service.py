@@ -1,3 +1,4 @@
+import importlib
 import logging
 import queue
 import threading
@@ -6,8 +7,20 @@ from dataclasses import dataclass, replace
 import os
 from typing import Any, Dict, Optional
 
-from binance.error import ClientError
-from binance.um_futures import UMFutures
+try:  # Binance SDK 为可选依赖，未安装时提供兼容处理
+    from binance.error import ClientError  # type: ignore
+except ModuleNotFoundError:  # pragma: no cover - fallback when SDK missing
+    class ClientError(Exception):  # type: ignore
+        def __init__(
+            self,
+            message: str = "",
+            *,
+            status_code: Optional[int] = None,
+            error_message: Optional[str] = None,
+        ) -> None:
+            super().__init__(message or error_message or "Binance client error")
+            self.status_code = status_code
+            self.error_message = error_message or message or ""
 
 from .database import (
     get_binance_follow_config,
@@ -55,7 +68,7 @@ class BinanceFollower:
         self._queue: "queue.Queue[Optional[Dict[str, Any]]]" = queue.Queue(maxsize=1024)
         self._thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
-        self._client: Optional[UMFutures] = None
+        self._client: Optional[Any] = None
         self._last_stop_loss_check = 0.0
 
     # Public API -----------------------------------------------------------
@@ -192,12 +205,39 @@ class BinanceFollower:
 
     # Helpers --------------------------------------------------------------
 
-    def _ensure_client(self) -> Optional[UMFutures]:
+    def _ensure_client(self) -> Optional[Any]:
         if self._client is not None:
             return self._client
         config = self._config
         if not config:
             return None
+        try:
+            module = importlib.import_module("binance.um_futures")
+        except ModuleNotFoundError:
+            logger.error(
+                "未找到 binance-connector，请执行 `pip install binance-connector` 后重启服务。"
+            )
+            update_binance_follow_status(
+                self.user_id,
+                enabled=False,
+                status="disabled",
+                stop_reason="缺少 binance-connector 包",
+            )
+            self._config = replace(config, enabled=False)
+            return None
+
+        UMFutures = getattr(module, "UMFutures", None)
+        if UMFutures is None:
+            logger.error("binance-connector 缺少 UMFutures 类，请检查依赖版本。")
+            update_binance_follow_status(
+                self.user_id,
+                enabled=False,
+                status="disabled",
+                stop_reason="binance-connector 版本不兼容",
+            )
+            self._config = replace(config, enabled=False)
+            return None
+
         try:
             self._client = UMFutures(
                 key=config.api_key,
@@ -228,7 +268,7 @@ class BinanceFollower:
             return None
         return self._client
 
-    def _fetch_total_wallet_balance(self, client: UMFutures) -> Optional[float]:
+    def _fetch_total_wallet_balance(self, client: Any) -> Optional[float]:
         try:
             account = client.account()
             balance = account.get("totalWalletBalance")
@@ -270,7 +310,7 @@ class BinanceFollower:
             return True
         return False
 
-    def _ensure_leverage(self, client: UMFutures, symbol: str, leverage: Any) -> None:
+    def _ensure_leverage(self, client: Any, symbol: str, leverage: Any) -> None:
         try:
             target = int(round(float(leverage)))
             if target < 1 or target > 125:
@@ -323,7 +363,7 @@ class BinanceFollower:
             return "SELL" if size > 0 else "BUY"
         return None
 
-    def _check_max_position(self, client: UMFutures, symbol: str, quantity: float, event_type: str) -> bool:
+    def _check_max_position(self, client: Any, symbol: str, quantity: float, event_type: str) -> bool:
         config = self._config
         if not config or not config.max_position or config.max_position <= 0:
             return True
@@ -350,7 +390,7 @@ class BinanceFollower:
 
     def _place_market_order(
         self,
-        client: UMFutures,
+        client: Any,
         symbol: str,
         side: str,
         quantity: float,
