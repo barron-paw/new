@@ -56,6 +56,13 @@ export default function BotFatherGuide({ usesDefaultBot = false, defaultBotUsern
           />
           <figcaption>{isEnglish ? 'Telegram Bot Raw returning the chat_id' : '通过 Telegram Bot Raw 获取 chat_id'}</figcaption>
         </figure>
+        <figure>
+          <img
+            src="https://raw.githubusercontent.com/barron-paw/new/main/2.jpg"
+            alt={isEnglish ? 'Copy the chat_id into configuration' : '复制 chat_id 并粘贴到监控配置'}
+          />
+          <figcaption>{isEnglish ? 'Copy the chat_id and paste it into the monitoring form.' : '复制 chat_id，粘贴到监控配置表单中。'}</figcaption>
+        </figure>
       </div>
     </div>
   );
