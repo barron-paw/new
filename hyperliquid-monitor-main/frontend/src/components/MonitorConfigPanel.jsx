@@ -16,13 +16,14 @@ export default function MonitorConfigPanel() {
   const { language, setLanguage } = useLanguage();
   const isEnglish = language === 'en';
   const [form, setForm] = useState({
-    telegramBotToken: '',
     telegramChatId: '',
     walletAddresses: '',
     language: 'zh',
   });
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState('');
+  const [usesDefaultBot, setUsesDefaultBot] = useState(false);
+  const [defaultBotUsername, setDefaultBotUsername] = useState('');
 
   const canEdit = user?.can_access_monitor;
 
@@ -35,12 +36,13 @@ export default function MonitorConfigPanel() {
       try {
         const data = await fetchMonitorConfig();
         setForm({
-          telegramBotToken: data.telegramBotToken || '',
           telegramChatId: data.telegramChatId || '',
           walletAddresses: (data.walletAddresses || []).join('\n'),
           language: data.language || 'zh',
         });
         setLanguage(data.language || 'zh');
+        setUsesDefaultBot(Boolean(data.usesDefaultBot));
+        setDefaultBotUsername(data.defaultBotUsername || '');
       } catch (err) {
         setStatus(isEnglish ? err.message || 'Failed to load monitor configuration' : err.message || '无法加载监控配置');
       } finally {
@@ -69,19 +71,19 @@ export default function MonitorConfigPanel() {
     try {
       setLoading(true);
       const payload = {
-        telegramBotToken: form.telegramBotToken.trim() || null,
         telegramChatId: form.telegramChatId.trim() || null,
         walletAddresses: parseAddresses(form.walletAddresses).slice(0, 2),
         language: form.language,
       };
       const response = await updateMonitorConfig(payload);
       setForm({
-        telegramBotToken: response.telegramBotToken || '',
         telegramChatId: response.telegramChatId || '',
         walletAddresses: (response.walletAddresses || []).join('\n'),
         language: response.language || 'zh',
       });
       setLanguage(response.language || 'zh');
+      setUsesDefaultBot(Boolean(response.usesDefaultBot));
+      setDefaultBotUsername(response.defaultBotUsername || '');
       setStatus(isEnglish ? 'Monitoring configuration saved.' : '监控配置已保存。');
     } catch (err) {
       setStatus(err.message || (isEnglish ? 'Save failed, please retry later.' : '保存失败，请稍后重试'));
@@ -97,8 +99,8 @@ export default function MonitorConfigPanel() {
           <h2>{isEnglish ? 'Monitoring Configuration' : '监控配置'}</h2>
           <p>
             {isEnglish
-              ? 'Provide Telegram credentials and wallet addresses. The server will start monitoring and push trade alerts automatically.'
-              : '填写 Telegram 凭证与钱包地址，保存后服务器会自动启动监控并推送交易提醒。'}
+              ? 'Save your Telegram chat ID and wallet addresses. The system already uses the official bot token for you.'
+              : '填写 Telegram chat_id 与钱包地址即可，系统已为您配置官方机器人 Token。'}
           </p>
         </div>
         {status ? <div className="monitor-config__status">{status}</div> : null}
@@ -110,39 +112,43 @@ export default function MonitorConfigPanel() {
         <div className="monitor-config__card monitor-config__card--form">
           <form className="monitor-config__form" onSubmit={handleSubmit}>
             <div className="monitor-config__fieldset">
-              <span className="monitor-config__legend">{isEnglish ? 'Telegram Credentials' : 'Telegram 凭证'}</span>
-              <div className="monitor-config__input-row">
-                <label className="monitor-config__field">
-                  <span>Bot Token</span>
-                  <input
-                    type="text"
-                    value={form.telegramBotToken}
-                    onChange={(event) => setForm((prev) => ({ ...prev, telegramBotToken: event.target.value }))}
-                    placeholder={isEnglish ? 'e.g. 123456789:ABCDEF' : '例如：123456789:ABCDEF'}
-                    disabled={!canEdit || loading}
-                  />
-                  <small>
+              <span className="monitor-config__legend">{isEnglish ? 'Telegram' : 'Telegram 设置'}</span>
+              <label className="monitor-config__field">
+                <span>{isEnglish ? 'Chat ID' : 'Chat ID'}</span>
+                <input
+                  type="text"
+                  value={form.telegramChatId}
+                  onChange={(event) => setForm((prev) => ({ ...prev, telegramChatId: event.target.value }))}
+                  placeholder={isEnglish ? 'Group or chat ID' : '群组或私聊 ID'}
+                  disabled={!canEdit || loading}
+                />
+                <small>
+                  {isEnglish ? (
+                    <>
+                      {usesDefaultBot
+                        ? 'Our default bot token is preconfigured. Talk to '
+                        : 'Provide the chat ID used by your Telegram bot. Talk to '}
+                      <strong>@TelegramBotRaw</strong> to obtain the ID.
+                    </>
+                  ) : (
+                    <>
+                      {usesDefaultBot ? '系统已内置官方机器人 Token。' : '如使用自建机器人请填写对应 chat_id。'}
+                      通过 <strong>@TelegramBotRaw</strong> 发送消息即可返回 chat_id。
+                    </>
+                  )}
+                </small>
+                {usesDefaultBot ? (
+                  <small className="monitor-config__field-note">
                     {isEnglish
-                      ? 'Token obtained from BotFather. Test it with your bot before saving.'
-                      : '来自 BotFather 的 Token，建议先测试是否能成功发送消息。'}
+                      ? defaultBotUsername
+                        ? `Default bot: ${defaultBotUsername}. Open Telegram, search for it, press Start once.`
+                        : 'Default bot token is active. Open Telegram and press Start on the official bot.'
+                      : defaultBotUsername
+                        ? `默认机器人：${defaultBotUsername}，在 Telegram 搜索并点击 Start 即可。`
+                        : '已启用默认机器人，请在 Telegram 中打开官方机器人并点击 Start。'}
                   </small>
-                </label>
-                <label className="monitor-config__field">
-                  <span>Chat ID</span>
-                  <input
-                    type="text"
-                    value={form.telegramChatId}
-                    onChange={(event) => setForm((prev) => ({ ...prev, telegramChatId: event.target.value }))}
-                    placeholder={isEnglish ? 'Group or chat ID' : '群组或私聊 ID'}
-                    disabled={!canEdit || loading}
-                  />
-                  <small>
-                    {isEnglish
-                      ? 'Use @TelegramBotRaw or @userinfobot to retrieve the ID.'
-                      : '可通过 @TelegramBotRaw 或 @userinfobot 查询。'}
-                  </small>
-                </label>
-              </div>
+                ) : null}
+              </label>
             </div>
 
             <div className="monitor-config__fieldset">
@@ -207,7 +213,7 @@ export default function MonitorConfigPanel() {
         </div>
 
         <div className="monitor-config__card monitor-config__card--guide">
-          <BotFatherGuide />
+          <BotFatherGuide usesDefaultBot={usesDefaultBot} defaultBotUsername={defaultBotUsername} />
         </div>
       </div>
     </section>
