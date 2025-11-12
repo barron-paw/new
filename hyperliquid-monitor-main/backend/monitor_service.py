@@ -1,5 +1,6 @@
 import importlib.util
 import logging
+import os
 import re
 import sys
 import threading
@@ -22,6 +23,7 @@ MONITOR_POSITIONS_PATH = BASE_DIR / "monitor_positions.py"
 STATE_STORE_PATH = BASE_DIR / "state_store.py"
 STATE_ROOT = BASE_DIR / "state_store"
 STATE_ROOT.mkdir(exist_ok=True)
+DEFAULT_TELEGRAM_BOT_TOKEN = os.getenv("DEFAULT_TELEGRAM_BOT_TOKEN", "").strip()
 
 
 class _SchedulerWrapper:
@@ -96,6 +98,7 @@ class UserMonitor:
         wallet_addresses: Tuple[str, ...],
         language: str,
     ) -> None:
+        old_language = self.config.language
         normalized_language = (language or "zh").lower()
         if normalized_language not in {"zh", "en"}:
             normalized_language = "zh"
@@ -103,8 +106,8 @@ class UserMonitor:
             telegram_bot_token != self.config.telegram_bot_token
             or telegram_chat_id != self.config.telegram_chat_id
             or wallet_addresses != self.config.wallet_addresses
-            or normalized_language != self.config.language
         )
+        language_changed = normalized_language != old_language
         self.config = _UserConfig(
             user_id=self.config.user_id,
             telegram_bot_token=telegram_bot_token,
@@ -115,6 +118,18 @@ class UserMonitor:
         if self._module is not None:
             try:
                 setattr(self._module, "LANGUAGE", self.config.language)
+                if language_changed and not restart_needed:
+                    try:
+                        self._module.send_wallet_snapshot(  # type: ignore[attr-defined]
+                            self.config.wallet_addresses,
+                            force=True,
+                        )
+                    except Exception as exc:
+                        logger.warning(
+                            "Failed to send forced snapshot after language switch for user %s: %s",
+                            self.config.user_id,
+                            exc,
+                        )
             except Exception:
                 logger.debug("Unable to update LANGUAGE for user %s", self.config.user_id)
         if restart_needed:
@@ -283,6 +298,9 @@ class MonitorRegistry:
         wallets_tuple = self._normalize_addresses(wallet_addresses)
         wallets_tuple = wallets_tuple[:2]
         token = (telegram_bot_token or "").strip()
+        if not token and DEFAULT_TELEGRAM_BOT_TOKEN:
+            token = DEFAULT_TELEGRAM_BOT_TOKEN
+            logger.debug("Using default Telegram bot token for user %s", user_id)
         chat_id = (telegram_chat_id or "").strip()
         lang = (language or "zh").lower()
         if lang not in {"zh", "en"}:

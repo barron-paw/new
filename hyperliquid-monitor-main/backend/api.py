@@ -71,6 +71,9 @@ SUBSCRIPTION_DURATION_DAYS = int(os.getenv("SUBSCRIPTION_DURATION_DAYS", "30"))
 REMINDER_LEAD_DAYS = int(os.getenv("SUBSCRIPTION_REMINDER_DAYS", "1"))
 REMINDER_TIME = os.getenv("SUBSCRIPTION_REMINDER_TIME", "09:00")
 
+DEFAULT_TELEGRAM_BOT_TOKEN = os.getenv("DEFAULT_TELEGRAM_BOT_TOKEN", "").strip()
+DEFAULT_TELEGRAM_BOT_USERNAME = os.getenv("DEFAULT_TELEGRAM_BOT_USERNAME", "").strip()
+
 SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com")
 SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
 SMTP_USERNAME = os.getenv("SMTP_USERNAME", "")
@@ -261,6 +264,8 @@ class MonitorConfig(BaseModel):
     telegram_chat_id: Optional[str] = Field(None, alias="telegramChatId")
     wallet_addresses: List[str] = Field(default_factory=list, alias="walletAddresses")
     language: str = Field("zh", alias="language")
+    uses_default_bot: bool = Field(False, alias="usesDefaultBot")
+    default_bot_username: Optional[str] = Field(None, alias="defaultBotUsername")
 
     class Config:
         populate_by_name = True
@@ -568,11 +573,14 @@ def verify_subscription(
 def get_monitor_config(current_user: Dict[str, Any] = Depends(_require_current_user)) -> MonitorConfig:
     _ensure_monitor_access(current_user)
     stored = get_user_config(current_user["id"])
+    uses_default = not stored.get("telegram_bot_token") and bool(DEFAULT_TELEGRAM_BOT_TOKEN)
     return MonitorConfig(
-        telegram_bot_token=stored.get("telegram_bot_token"),
+        telegram_bot_token=None if uses_default else stored.get("telegram_bot_token"),
         telegram_chat_id=stored.get("telegram_chat_id"),
         wallet_addresses=stored.get("wallet_addresses", []),
         language=stored.get("language", "zh"),
+        uses_default_bot=uses_default,
+        default_bot_username=DEFAULT_TELEGRAM_BOT_USERNAME or None,
     )
 
 
@@ -593,18 +601,22 @@ def update_monitor_config(
         wallets,
         language,
     )
+    effective_token = record.get("telegram_bot_token") or DEFAULT_TELEGRAM_BOT_TOKEN or None
     configure_user_monitor(
         current_user["id"],
-        telegram_bot_token=record.get("telegram_bot_token"),
+        telegram_bot_token=effective_token,
         telegram_chat_id=record.get("telegram_chat_id"),
         wallet_addresses=record.get("wallet_addresses", []),
         language=record.get("language", "zh"),
     )
+    uses_default = not record.get("telegram_bot_token") and bool(DEFAULT_TELEGRAM_BOT_TOKEN)
     return MonitorConfig(
-        telegram_bot_token=record.get("telegram_bot_token"),
+        telegram_bot_token=None if uses_default else record.get("telegram_bot_token"),
         telegram_chat_id=record.get("telegram_chat_id"),
         wallet_addresses=record.get("wallet_addresses", []),
         language=record.get("language", "zh"),
+        uses_default_bot=uses_default,
+        default_bot_username=DEFAULT_TELEGRAM_BOT_USERNAME or None,
     )
 
 
