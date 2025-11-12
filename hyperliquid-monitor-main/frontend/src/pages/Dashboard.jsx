@@ -10,6 +10,7 @@ import useWalletData from '../hooks/useWalletData';
 import AccountMenu from '../components/AccountMenu.jsx';
 import SubscriptionPanel from '../components/SubscriptionPanel.jsx';
 import MonitorConfigPanel from '../components/MonitorConfigPanel.jsx';
+import BinanceFollowPanel from '../components/BinanceFollowPanel.jsx';
 import { useLanguage } from '../context/LanguageContext.jsx';
 
 export function Dashboard() {
@@ -63,7 +64,10 @@ export function Dashboard() {
   return (
     <Layout header={header} actions={<AccountMenu />} footer={footer}>
       <SubscriptionPanel />
-      <MonitorConfigPanel />
+      <div className="dashboard__config-grid">
+        <MonitorConfigPanel />
+        <BinanceFollowPanel />
+      </div>
 
       <WalletSelector
         value={selectedWallet}

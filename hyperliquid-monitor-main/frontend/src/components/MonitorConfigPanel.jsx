@@ -12,6 +12,10 @@ function parseAddresses(value) {
 }
 
 export default function MonitorConfigPanel() {
+const GUIDE_EXPANDED_KEY = 'hm_telegram_guide_expanded';
+const GUIDE_SEEN_KEY = 'hm_telegram_guide_seen';
+
+export default function MonitorConfigPanel() {
   const { user } = useAuth();
   const { language, setLanguage } = useLanguage();
   const isEnglish = language === 'en';
@@ -24,6 +28,7 @@ export default function MonitorConfigPanel() {
   const [status, setStatus] = useState('');
   const [usesDefaultBot, setUsesDefaultBot] = useState(false);
   const [defaultBotUsername, setDefaultBotUsername] = useState('');
+  const [guideExpanded, setGuideExpanded] = useState(true);
 
   const canEdit = user?.can_access_monitor;
 
@@ -51,6 +56,25 @@ export default function MonitorConfigPanel() {
     };
     loadConfig();
   }, [canEdit, isEnglish, setLanguage]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+    const stored = window.localStorage.getItem(GUIDE_EXPANDED_KEY);
+    if (stored !== null) {
+      setGuideExpanded(stored === 'true');
+      return;
+    }
+    const seen = window.localStorage.getItem(GUIDE_SEEN_KEY);
+    if (seen) {
+      setGuideExpanded(false);
+    } else {
+      window.localStorage.setItem(GUIDE_SEEN_KEY, 'true');
+      window.localStorage.setItem(GUIDE_EXPANDED_KEY, 'true');
+      setGuideExpanded(true);
+    }
+  }, []);
 
   const helperText = useMemo(() => {
     if (!user) {
@@ -91,6 +115,21 @@ export default function MonitorConfigPanel() {
       setLoading(false);
     }
   };
+
+  const toggleGuide = () => {
+    setGuideExpanded((prev) => {
+      const next = !prev;
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem(GUIDE_EXPANDED_KEY, String(next));
+        window.localStorage.setItem(GUIDE_SEEN_KEY, 'true');
+      }
+      return next;
+    });
+  };
+
+  const guideToggleLabel = guideExpanded
+    ? (isEnglish ? 'Hide Telegram guide' : '收起 Telegram 指南')
+    : (isEnglish ? 'Show Telegram guide' : '展开 Telegram 指南');
 
   return (
     <section className="dashboard__section monitor-config">
@@ -213,7 +252,12 @@ export default function MonitorConfigPanel() {
         </div>
 
         <div className="monitor-config__card monitor-config__card--guide">
-          <BotFatherGuide usesDefaultBot={usesDefaultBot} defaultBotUsername={defaultBotUsername} />
+          <button type="button" className="monitor-config__guide-toggle" onClick={toggleGuide}>
+            {guideToggleLabel}
+          </button>
+          {guideExpanded ? (
+            <BotFatherGuide usesDefaultBot={usesDefaultBot} defaultBotUsername={defaultBotUsername} />
+          ) : null}
         </div>
       </div>
     </section>

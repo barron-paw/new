@@ -145,6 +145,17 @@
   gap: var(--space-lg);
 }
 
+.monitor-config__field--inline {
+  flex-direction: row;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.monitor-config__field--inline input[type='checkbox'] {
+  width: auto;
+  height: 1.1rem;
+}
+
 .monitor-config__fieldset {
   display: flex;
   flex-direction: column;
@@ -222,7 +233,7 @@
 
 .monitor-config__field-note {
   font-size: 0.75rem;
-  color: var(--accent-secondary);
+  color: var(--accent-primary);
   line-height: 1.4;
 }
 
@@ -259,11 +270,92 @@
   color: var(--text-muted);
 }
 
+.monitor-config__guide {
+  margin-top: var(--space-md);
+}
+
+.monitor-config__guide-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  border: none;
+  background: none;
+  color: var(--accent-primary);
+  font-size: 0.9rem;
+  cursor: pointer;
+  padding: 0;
+}
+
+.monitor-config__guide-toggle:hover {
+  text-decoration: underline;
+}
+
 .monitor-config__card--guide {
   background: linear-gradient(160deg, rgba(33, 45, 120, 0.75), rgba(15, 21, 52, 0.9));
   border: 1px solid rgba(90, 110, 255, 0.25);
 }
 
+.dashboard__config-grid {
+  display: grid;
+  gap: var(--space-xl);
+  margin-bottom: var(--space-xl);
+}
+
+@media (min-width: 1180px) {
+  .dashboard__config-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.binance-follow__status {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
+  margin-bottom: var(--space-md);
+}
+
+.binance-follow__badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.25rem 0.75rem;
+  border-radius: var(--radius-pill);
+  font-size: 0.85rem;
+  font-weight: 600;
+  background: var(--info-soft);
+  color: var(--accent-primary);
+}
+
+.binance-follow__badge--active {
+  background: var(--success-soft);
+  color: var(--success);
+}
+
+.binance-follow__badge--stopped_by_loss {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.binance-follow__status-text {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.binance-follow__reset {
+  align-self: flex-start;
+  padding: calc(var(--space-xs) * 0.75) var(--space-md);
+  border-radius: var(--radius-pill);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  background: transparent;
+  color: var(--text-primary);
+  cursor: pointer;
+  font-size: 0.85rem;
+  transition: background 0.2s ease, color 0.2s ease;
+}
+
+.binance-follow__reset:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--accent-primary);
+}
 .monitor-config__details {
   margin-top: var(--space-lg);
   padding: var(--space-md) var(--space-lg);
