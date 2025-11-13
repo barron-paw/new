@@ -120,6 +120,9 @@ refresh_state_store_configuration()
 
 TELEGRAM_BOT_TOKEN = _get_env_var("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = _get_env_var("TELEGRAM_CHAT_ID")
+WECOM_ENABLED = False
+WECOM_WEBHOOK_URL: Optional[str] = None
+WECOM_MENTIONS: Tuple[str, ...] = ()
 CONFIGURED_ADDRESSES: Tuple[str, ...] = tuple(
     _parse_wallet_addresses(_get_env_var("WALLET_ADDRESSES") or "[]")
 )
@@ -1210,6 +1213,40 @@ def send_telegram_message(message: str) -> bool:
     return False
 
 
+def send_wecom_message(message: str) -> bool:
+    if not WECOM_ENABLED or not WECOM_WEBHOOK_URL:
+        return False
+    payload: Dict[str, Any] = {
+        "msgtype": "text",
+        "text": {
+            "content": message,
+        },
+    }
+    mentions = [item for item in WECOM_MENTIONS if item]
+    if mentions:
+        payload["text"]["mentioned_mobile_list"] = mentions  # type: ignore[index]
+    try:
+        response = requests.post(WECOM_WEBHOOK_URL, json=payload, timeout=API_TIMEOUT)
+    except requests.exceptions.RequestException as exc:
+        logger.error("Error sending WeCom message: %s", exc)
+        return False
+    except Exception as exc:  # pragma: no cover - unexpected path
+        logger.error("Unexpected error sending WeCom message: %s", exc)
+        return False
+    if response.status_code != 200:
+        logger.warning("WeCom webhook returned %s: %s", response.status_code, response.text)
+        return False
+    try:
+        data = response.json()
+    except ValueError:
+        logger.warning("WeCom webhook response is not JSON: %s", response.text)
+        return False
+    if data.get("errcode") != 0:
+        logger.warning("WeCom webhook error: %s", data)
+        return False
+    return True
+
+
 _STATE_STORE_ALERT_REGISTERED = False
 EVENT_PROCESSOR = None  # type: ignore
 USER_ID = None  # type: ignore
@@ -1228,6 +1265,12 @@ def _ensure_state_store_alerts() -> None:
                 logger.info("Dispatched Redis alert to Telegram")
             else:
                 logger.error("Failed to dispatch Redis alert to Telegram")
+        elif WECOM_ENABLED and WECOM_WEBHOOK_URL:
+            alert_text = f"⚠️ Redis state store issue\n{message}"
+            if send_wecom_message(alert_text):
+                logger.info("Dispatched Redis alert to WeCom")
+            else:
+                logger.error("Failed to dispatch Redis alert to WeCom")
         else:
             logger.error("Cannot dispatch Redis alert; Telegram credentials missing")
 
@@ -1557,7 +1600,8 @@ def _process_addresses(
                 logger.error("用户 %s 事件分发失败: %s", user_id, exc)
 
     for address, event_type, coin, message in pending_notifications:
-        if send_telegram_message(message):
+        telegram_sent = send_telegram_message(message)
+        if telegram_sent:
             logger.info("Sent %s notification for %s from %s", event_type, coin, address)
         else:
             logger.warning(
@@ -1566,6 +1610,16 @@ def _process_addresses(
                 coin,
                 address,
             )
+        if WECOM_ENABLED and WECOM_WEBHOOK_URL:
+            if send_wecom_message(message):
+                logger.info("Sent %s notification to WeCom for %s from %s", event_type, coin, address)
+            else:
+                logger.warning(
+                    "Failed to send %s notification to WeCom for %s from %s",
+                    event_type,
+                    coin,
+                    address,
+                )
         time.sleep(MESSAGE_DELAY_SECONDS)
 
 

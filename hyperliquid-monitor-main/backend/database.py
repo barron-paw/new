@@ -48,6 +48,9 @@ def init_db() -> None:
                 binance_baseline_balance REAL,
                 binance_follow_status TEXT DEFAULT 'disabled',
                 binance_follow_stop_reason TEXT,
+                wecom_enabled INTEGER DEFAULT 0,
+                wecom_webhook_url TEXT,
+                wecom_mentions TEXT,
                 FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
             )
             """
@@ -78,6 +81,9 @@ def init_db() -> None:
             "binance_baseline_balance": "REAL",
             "binance_follow_status": "TEXT DEFAULT 'disabled'",
             "binance_follow_stop_reason": "TEXT",
+            "wecom_enabled": "INTEGER DEFAULT 0",
+            "wecom_webhook_url": "TEXT",
+            "wecom_mentions": "TEXT",
         }
         for column, ddl in required_columns.items():
             if column not in existing_columns:
@@ -171,6 +177,9 @@ def get_user_config(user_id: int) -> Dict[str, Any]:
             "wallet_addresses": wallets,
             "updated_at": row["updated_at"],
             "language": language,
+            "wecom_enabled": bool(row.get("wecom_enabled", 0)),
+            "wecom_webhook_url": row.get("wecom_webhook_url"),
+            "wecom_mentions": (row.get("wecom_mentions") or "").split(",") if row.get("wecom_mentions") else [],
         }
 
 
@@ -202,6 +211,46 @@ def upsert_user_config(
         )
         conn.commit()
     return get_user_config(user_id)
+
+
+def get_wecom_config(user_id: int) -> Dict[str, Any]:
+    record = get_user_config(user_id)
+    mentions = record.get("wecom_mentions") or []
+    if isinstance(mentions, str):
+        mentions = [item for item in mentions.split(",") if item]
+    return {
+        "enabled": bool(record.get("wecom_enabled")),
+        "webhook_url": record.get("wecom_webhook_url"),
+        "mentions": mentions,
+    }
+
+
+def upsert_wecom_config(
+    user_id: int,
+    *,
+    enabled: bool,
+    webhook_url: Optional[str],
+    mentions: Optional[List[str]],
+) -> Dict[str, Any]:
+    mentions_value = ",".join([item.strip() for item in mentions or [] if item.strip()])
+    with get_db() as conn:
+        conn.execute(
+            """
+            INSERT INTO user_configs (
+                user_id,
+                wecom_enabled,
+                wecom_webhook_url,
+                wecom_mentions
+            ) VALUES (?, ?, ?, ?)
+            ON CONFLICT(user_id) DO UPDATE SET
+                wecom_enabled = excluded.wecom_enabled,
+                wecom_webhook_url = excluded.wecom_webhook_url,
+                wecom_mentions = excluded.wecom_mentions
+            """,
+            (user_id, 1 if enabled else 0, (webhook_url or "").strip() or None, mentions_value or None),
+        )
+        conn.commit()
+    return get_wecom_config(user_id)
 
 
 def get_binance_follow_config(user_id: int) -> Dict[str, Any]:

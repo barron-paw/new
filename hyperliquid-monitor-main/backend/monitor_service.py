@@ -46,6 +46,9 @@ class _UserConfig:
     telegram_chat_id: str
     wallet_addresses: Tuple[str, ...]
     language: str = "zh"
+    wecom_enabled: bool = False
+    wecom_webhook_url: Optional[str] = None
+    wecom_mentions: Tuple[str, ...] = ()
 
 
 class UserMonitor:
@@ -97,6 +100,9 @@ class UserMonitor:
         telegram_chat_id: str,
         wallet_addresses: Tuple[str, ...],
         language: str,
+        wecom_enabled: bool,
+        wecom_webhook_url: Optional[str],
+        wecom_mentions: Tuple[str, ...],
     ) -> None:
         old_language = self.config.language
         normalized_language = (language or "zh").lower()
@@ -106,6 +112,9 @@ class UserMonitor:
             telegram_bot_token != self.config.telegram_bot_token
             or telegram_chat_id != self.config.telegram_chat_id
             or wallet_addresses != self.config.wallet_addresses
+            or wecom_enabled != self.config.wecom_enabled
+            or wecom_webhook_url != self.config.wecom_webhook_url
+            or wecom_mentions != self.config.wecom_mentions
         )
         language_changed = normalized_language != old_language
         self.config = _UserConfig(
@@ -114,10 +123,16 @@ class UserMonitor:
             telegram_chat_id=telegram_chat_id,
             wallet_addresses=wallet_addresses,
             language=normalized_language,
+            wecom_enabled=wecom_enabled,
+            wecom_webhook_url=wecom_webhook_url,
+            wecom_mentions=wecom_mentions,
         )
         if self._module is not None:
             try:
                 setattr(self._module, "LANGUAGE", self.config.language)
+                setattr(self._module, "WECOM_ENABLED", self.config.wecom_enabled)
+                setattr(self._module, "WECOM_WEBHOOK_URL", self.config.wecom_webhook_url)
+                setattr(self._module, "WECOM_MENTIONS", self.config.wecom_mentions)
                 if language_changed and not restart_needed:
                     try:
                         self._module.send_wallet_snapshot(  # type: ignore[attr-defined]
@@ -195,6 +210,9 @@ class UserMonitor:
         module.schedule = _SchedulerWrapper()  # type: ignore[attr-defined]
         module.LANGUAGE = getattr(self.config, "language", "zh")  # type: ignore[attr-defined]
         module.USER_ID = self.config.user_id  # type: ignore[attr-defined]
+        module.WECOM_ENABLED = getattr(self.config, "wecom_enabled", False)  # type: ignore[attr-defined]
+        module.WECOM_WEBHOOK_URL = getattr(self.config, "wecom_webhook_url", None)  # type: ignore[attr-defined]
+        module.WECOM_MENTIONS = getattr(self.config, "wecom_mentions", ())  # type: ignore[attr-defined]
         try:
             from .binance_follow_service import dispatch_trade_event
 
@@ -304,6 +322,9 @@ class MonitorRegistry:
         telegram_chat_id: Optional[str],
         wallet_addresses: Iterable[str],
         language: str,
+        wecom_enabled: bool,
+        wecom_webhook_url: Optional[str],
+        wecom_mentions: Iterable[str],
     ) -> None:
         wallets_tuple = self._normalize_addresses(wallet_addresses)
         wallets_tuple = wallets_tuple[:2]
@@ -315,6 +336,9 @@ class MonitorRegistry:
         lang = (language or "zh").lower()
         if lang not in {"zh", "en"}:
             lang = "zh"
+        webhook = (wecom_webhook_url or "").strip() or None
+        mentions_tuple = tuple(item.strip() for item in wecom_mentions if item.strip())
+        wecom_active = bool(wecom_enabled and webhook)
 
         with self._lock:
             existing = self._monitors.get(user_id)
@@ -331,6 +355,9 @@ class MonitorRegistry:
                     telegram_chat_id=chat_id,
                     wallet_addresses=wallets_tuple,
                     language=lang,
+                    wecom_enabled=wecom_active,
+                    wecom_webhook_url=webhook,
+                    wecom_mentions=mentions_tuple,
                 )
                 return
 
@@ -341,6 +368,9 @@ class MonitorRegistry:
                     telegram_chat_id=chat_id,
                     wallet_addresses=wallets_tuple,
                     language=lang,
+                    wecom_enabled=wecom_active,
+                    wecom_webhook_url=webhook,
+                    wecom_mentions=mentions_tuple,
                 )
             )
             self._monitors[user_id] = monitor
@@ -363,6 +393,9 @@ def configure_user_monitor(
     telegram_chat_id: Optional[str],
     wallet_addresses: Iterable[str],
     language: str,
+    wecom_enabled: bool,
+    wecom_webhook_url: Optional[str],
+    wecom_mentions: Iterable[str],
 ) -> None:
     registry.configure_user(
         user_id,
@@ -370,6 +403,9 @@ def configure_user_monitor(
         telegram_chat_id=telegram_chat_id,
         wallet_addresses=wallet_addresses,
         language=language,
+        wecom_enabled=wecom_enabled,
+        wecom_webhook_url=wecom_webhook_url,
+        wecom_mentions=wecom_mentions,
     )
 
 
@@ -392,5 +428,8 @@ def initialise_monitors_from_db() -> None:
             telegram_chat_id=config.get("telegram_chat_id"),
             wallet_addresses=config.get("wallet_addresses", []),
             language=config.get("language", "zh"),
+            wecom_enabled=bool(config.get("wecom_enabled")),
+            wecom_webhook_url=config.get("wecom_webhook_url"),
+            wecom_mentions=config.get("wecom_mentions", []),
         )
 

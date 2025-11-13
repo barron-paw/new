@@ -35,6 +35,8 @@ from .database import (
     consume_email_verification,
     get_binance_follow_config,
     upsert_binance_follow_config,
+    get_wecom_config,
+    upsert_wecom_config,
 )
 from .monitor_positions import (
     CONFIGURED_ADDRESSES,
@@ -178,6 +180,17 @@ def _build_binance_response(record: Dict[str, Any]) -> BinanceFollowConfigRespon
         baseline_balance=record.get("baseline_balance"),
         status=record.get("status"),
         stop_reason=record.get("stop_reason"),
+    )
+
+
+def _build_wecom_response(record: Dict[str, Any]) -> "WecomConfigResponse":
+    mentions = record.get("mentions") or []
+    if isinstance(mentions, str):
+        mentions = [item for item in mentions.split(",") if item]
+    return WecomConfigResponse(
+        enabled=bool(record.get("enabled")),
+        webhook_url=record.get("webhook_url"),
+        mentions=list(mentions),
     )
 
 
@@ -327,6 +340,24 @@ class BinanceFollowConfigRequest(BaseModel):
     api_key: Optional[str] = Field(None, alias="apiKey")
     api_secret: Optional[str] = Field(None, alias="apiSecret")
     reset_credentials: bool = Field(False, alias="resetCredentials")
+
+    class Config:
+        populate_by_name = True
+
+
+class WecomConfigResponse(BaseModel):
+    enabled: bool = False
+    webhook_url: Optional[str] = Field(None, alias="webhookUrl")
+    mentions: List[str] = Field(default_factory=list, alias="mentions")
+
+    class Config:
+        populate_by_name = True
+
+
+class WecomConfigRequest(BaseModel):
+    enabled: bool = False
+    webhook_url: Optional[str] = Field(None, alias="webhookUrl")
+    mentions: List[str] = Field(default_factory=list, alias="mentions")
 
     class Config:
         populate_by_name = True
@@ -671,6 +702,9 @@ def update_monitor_config(
         telegram_chat_id=record.get("telegram_chat_id"),
         wallet_addresses=record.get("wallet_addresses", []),
         language=record.get("language", "zh"),
+        wecom_enabled=bool(record.get("wecom_enabled")),
+        wecom_webhook_url=record.get("wecom_webhook_url"),
+        wecom_mentions=record.get("wecom_mentions", []),
     )
     uses_default = not record.get("telegram_bot_token") and bool(DEFAULT_TELEGRAM_BOT_TOKEN)
     return MonitorConfig(
@@ -741,6 +775,43 @@ def save_binance_follow_config(
     )
     configure_binance_follow(current_user["id"], record)
     return _build_binance_response(record)
+
+
+@app.get("/api/wecom", response_model=WecomConfigResponse)
+def fetch_wecom_config(
+    current_user: Dict[str, Any] = Depends(_require_current_user),
+) -> WecomConfigResponse:
+    _ensure_monitor_access(current_user)
+    record = get_wecom_config(current_user["id"])
+    return _build_wecom_response(record)
+
+
+@app.post("/api/wecom", response_model=WecomConfigResponse)
+def save_wecom_config(
+    payload: WecomConfigRequest,
+    current_user: Dict[str, Any] = Depends(_require_current_user),
+) -> WecomConfigResponse:
+    _ensure_monitor_access(current_user)
+    mentions = [item.strip() for item in payload.mentions if item.strip()]
+    record = upsert_wecom_config(
+        current_user["id"],
+        enabled=payload.enabled and bool((payload.webhook_url or "").strip()),
+        webhook_url=(payload.webhook_url or "").strip() or None,
+        mentions=mentions,
+    )
+    full_config = get_user_config(current_user["id"])
+    effective_token = full_config.get("telegram_bot_token") or DEFAULT_TELEGRAM_BOT_TOKEN or None
+    configure_user_monitor(
+        current_user["id"],
+        telegram_bot_token=effective_token,
+        telegram_chat_id=full_config.get("telegram_chat_id"),
+        wallet_addresses=full_config.get("wallet_addresses", []),
+        language=full_config.get("language", "zh"),
+        wecom_enabled=record.get("enabled", False),
+        wecom_webhook_url=record.get("webhook_url"),
+        wecom_mentions=record.get("mentions", []),
+    )
+    return _build_wecom_response(record)
 
 
 def _topic_to_address(topic: str) -> str:
