@@ -120,6 +120,7 @@ refresh_state_store_configuration()
 
 TELEGRAM_BOT_TOKEN = _get_env_var("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = _get_env_var("TELEGRAM_CHAT_ID")
+TELEGRAM_ENABLED = True  # 默认启用，由 monitor_service 根据配置设置
 WECOM_ENABLED = False
 WECOM_WEBHOOK_URL: Optional[str] = None
 WECOM_MENTIONS: Tuple[str, ...] = ()
@@ -1178,7 +1179,7 @@ def _format_wallet_snapshot(
 
 def send_telegram_message(message: str) -> bool:
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
-        logger.error("Telegram credentials not configured")
+        logger.warning("Telegram credentials not configured: token=%s, chat_id=%s", bool(TELEGRAM_BOT_TOKEN), bool(TELEGRAM_CHAT_ID))
         return False
 
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
@@ -1222,29 +1223,47 @@ def send_wecom_message(message: str) -> bool:
             "content": message,
         },
     }
-    mentions = [item for item in WECOM_MENTIONS if item]
+    # 处理手机号：去除 @ 符号和空格，只保留数字
+    mentions = []
+    for item in WECOM_MENTIONS:
+        if item:
+            # 去除 @ 符号、空格和其他非数字字符，只保留数字
+            cleaned = item.strip().lstrip("@").strip()
+            if cleaned and cleaned.isdigit():
+                mentions.append(cleaned)
     if mentions:
         payload["text"]["mentioned_mobile_list"] = mentions  # type: ignore[index]
-    try:
-        response = requests.post(WECOM_WEBHOOK_URL, json=payload, timeout=API_TIMEOUT)
-    except requests.exceptions.RequestException as exc:
-        logger.error("Error sending WeCom message: %s", exc)
-        return False
-    except Exception as exc:  # pragma: no cover - unexpected path
-        logger.error("Unexpected error sending WeCom message: %s", exc)
-        return False
-    if response.status_code != 200:
-        logger.warning("WeCom webhook returned %s: %s", response.status_code, response.text)
-        return False
-    try:
-        data = response.json()
-    except ValueError:
-        logger.warning("WeCom webhook response is not JSON: %s", response.text)
-        return False
-    if data.get("errcode") != 0:
-        logger.warning("WeCom webhook error: %s", data)
-        return False
-    return True
+    for attempt in range(MAX_RETRIES):
+        try:
+            response = requests.post(WECOM_WEBHOOK_URL, json=payload, timeout=API_TIMEOUT)
+            response.raise_for_status()
+            result = response.json()
+            if result.get("errcode") == 0:
+                return True
+            else:
+                logger.error("WeCom API returned error: %s", result.get("errmsg", "Unknown error"))
+                if attempt == MAX_RETRIES - 1:
+                    return False
+                wait_time = RETRY_DELAY * (2 ** attempt)
+                logger.warning("Retrying WeCom message in %ss (attempt %s/%s)", wait_time, attempt + 1, MAX_RETRIES)
+                time.sleep(wait_time)
+        except requests.exceptions.Timeout:
+            if attempt == MAX_RETRIES - 1:
+                logger.error("WeCom API timeout after %s attempts", MAX_RETRIES)
+                return False
+            wait_time = RETRY_DELAY * (2 ** attempt)
+            logger.warning("WeCom API timeout (attempt %s/%s), retrying in %ss", attempt + 1, MAX_RETRIES, wait_time)
+            time.sleep(wait_time)
+        except requests.exceptions.RequestException as exc:
+            logger.error("Error sending WeCom message: %s", exc)
+            if attempt == MAX_RETRIES - 1:
+                return False
+            wait_time = RETRY_DELAY * (2 ** attempt)
+            time.sleep(wait_time)
+        except Exception as exc:  # pragma: no cover - unexpected path
+            logger.error("Unexpected error sending WeCom message: %s", exc)
+            return False
+    return False
 
 
 _STATE_STORE_ALERT_REGISTERED = False
@@ -1259,7 +1278,7 @@ def _ensure_state_store_alerts() -> None:
 
     def _handle_state_store_alert(message: str) -> None:
         logger.warning("State store alert: %s", message)
-        if TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID:
+        if TELEGRAM_ENABLED and TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID:
             alert_text = f"⚠️ Redis state store issue\n{message}"
             if send_telegram_message(alert_text):
                 logger.info("Dispatched Redis alert to Telegram")
@@ -1600,16 +1619,23 @@ def _process_addresses(
                 logger.error("用户 %s 事件分发失败: %s", user_id, exc)
 
     for address, event_type, coin, message in pending_notifications:
-        telegram_sent = send_telegram_message(message)
-        if telegram_sent:
-            logger.info("Sent %s notification for %s from %s", event_type, coin, address)
+        # 发送 Telegram 消息（只有在启用且有配置时才发送）
+        if TELEGRAM_ENABLED and TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID:
+            telegram_sent = send_telegram_message(message)
+            if telegram_sent:
+                logger.info("Sent %s notification to Telegram for %s from %s", event_type, coin, address)
+            else:
+                logger.warning(
+                    "Failed to send %s notification to Telegram for %s from %s",
+                    event_type,
+                    coin,
+                    address,
+                )
         else:
-            logger.warning(
-                "Failed to send %s notification for %s from %s",
-                event_type,
-                coin,
-                address,
-            )
+            logger.debug("Skipping Telegram notification: enabled=%s, token=%s, chat_id=%s", 
+                        TELEGRAM_ENABLED, bool(TELEGRAM_BOT_TOKEN), bool(TELEGRAM_CHAT_ID))
+        
+        # 发送企业微信消息（只有在启用且有配置时才发送）
         if WECOM_ENABLED and WECOM_WEBHOOK_URL:
             if send_wecom_message(message):
                 logger.info("Sent %s notification to WeCom for %s from %s", event_type, coin, address)
@@ -1620,6 +1646,9 @@ def _process_addresses(
                     coin,
                     address,
                 )
+        else:
+            logger.debug("Skipping WeCom notification: enabled=%s, webhook=%s", WECOM_ENABLED, bool(WECOM_WEBHOOK_URL))
+        
         time.sleep(MESSAGE_DELAY_SECONDS)
 
 
@@ -1691,6 +1720,18 @@ def stop_websocket_monitoring() -> None:
     global _websocket_running
     _websocket_running = False
     _stop_event.set()
+    # 尝试清理 websocket 订阅，避免重复订阅错误
+    try:
+        addresses = list(CONFIGURED_ADDRESSES)
+        for address in addresses:
+            try:
+                # 尝试取消订阅（如果 SDK 支持）
+                if hasattr(info_client, 'unsubscribe'):
+                    info_client.unsubscribe({"type": "userEvents", "user": address})
+            except Exception as exc:
+                logger.debug("Error unsubscribing from websocket for %s: %s", address, exc)
+    except Exception as exc:
+        logger.debug("Error during websocket cleanup: %s", exc)
     logger.info("Websocket monitoring stopped")
 
 

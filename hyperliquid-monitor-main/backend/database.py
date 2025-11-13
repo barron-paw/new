@@ -157,6 +157,9 @@ def get_user_config(user_id: int) -> Dict[str, Any]:
                 "wallet_addresses": [],
                 "updated_at": None,
                 "language": "zh",
+                "wecom_enabled": False,
+                "wecom_webhook_url": None,
+                "wecom_mentions": [],
             }
         raw_wallets = row["wallet_addresses"] or "[]"
         try:
@@ -171,15 +174,22 @@ def get_user_config(user_id: int) -> Dict[str, Any]:
             language = value.lower() if isinstance(value, str) else "zh"
             if language not in {"zh", "en"}:
                 language = "zh"
+        # 安全地访问可能不存在的列
+        row_keys = row.keys() if hasattr(row, "keys") else []
+        wecom_enabled = bool(row["wecom_enabled"]) if "wecom_enabled" in row_keys else False
+        wecom_webhook_url = row["wecom_webhook_url"] if "wecom_webhook_url" in row_keys else None
+        wecom_mentions_raw = row["wecom_mentions"] if "wecom_mentions" in row_keys else None
+        wecom_mentions = (wecom_mentions_raw.split(",") if wecom_mentions_raw else [])
+        
         return {
             "telegram_bot_token": row["telegram_bot_token"],
             "telegram_chat_id": row["telegram_chat_id"],
             "wallet_addresses": wallets,
             "updated_at": row["updated_at"],
             "language": language,
-            "wecom_enabled": bool(row.get("wecom_enabled", 0)),
-            "wecom_webhook_url": row.get("wecom_webhook_url"),
-            "wecom_mentions": (row.get("wecom_mentions") or "").split(",") if row.get("wecom_mentions") else [],
+            "wecom_enabled": wecom_enabled,
+            "wecom_webhook_url": wecom_webhook_url,
+            "wecom_mentions": wecom_mentions,
         }
 
 

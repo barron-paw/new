@@ -695,16 +695,23 @@ def update_monitor_config(
         wallets,
         language,
     )
+    # 获取最新的企业微信配置（因为可能已经保存了）
+    wecom_config = get_wecom_config(current_user["id"])
     effective_token = record.get("telegram_bot_token") or DEFAULT_TELEGRAM_BOT_TOKEN or None
+    logger.info("Updating monitor config for user %s: telegram_chat_id=%s, wallets=%s, wecom_enabled=%s", 
+                current_user["id"],
+                bool(record.get("telegram_chat_id")),
+                len(record.get("wallet_addresses", [])),
+                wecom_config.get("enabled", False))
     configure_user_monitor(
         current_user["id"],
         telegram_bot_token=effective_token,
         telegram_chat_id=record.get("telegram_chat_id"),
         wallet_addresses=record.get("wallet_addresses", []),
         language=record.get("language", "zh"),
-        wecom_enabled=bool(record.get("wecom_enabled")),
-        wecom_webhook_url=record.get("wecom_webhook_url"),
-        wecom_mentions=record.get("wecom_mentions", []),
+        wecom_enabled=bool(wecom_config.get("enabled", False)),
+        wecom_webhook_url=wecom_config.get("webhook_url"),
+        wecom_mentions=wecom_config.get("mentions", []),
     )
     uses_default = not record.get("telegram_bot_token") and bool(DEFAULT_TELEGRAM_BOT_TOKEN)
     return MonitorConfig(
@@ -792,7 +799,13 @@ def save_wecom_config(
     current_user: Dict[str, Any] = Depends(_require_current_user),
 ) -> WecomConfigResponse:
     _ensure_monitor_access(current_user)
-    mentions = [item.strip() for item in payload.mentions if item.strip()]
+    # 处理手机号：去除 @ 符号，只保留数字
+    mentions = []
+    for item in payload.mentions:
+        if item and item.strip():
+            cleaned = item.strip().lstrip("@").strip()
+            if cleaned and cleaned.isdigit():
+                mentions.append(cleaned)
     record = upsert_wecom_config(
         current_user["id"],
         enabled=payload.enabled and bool((payload.webhook_url or "").strip()),
@@ -801,16 +814,26 @@ def save_wecom_config(
     )
     full_config = get_user_config(current_user["id"])
     effective_token = full_config.get("telegram_bot_token") or DEFAULT_TELEGRAM_BOT_TOKEN or None
+    wecom_enabled = record.get("enabled", False)
+    wecom_webhook_url = record.get("webhook_url")
+    wecom_mentions = record.get("mentions", [])
+    logger.info("Updating WeCom config for user %s: enabled=%s, webhook=%s, mentions=%s", 
+                current_user["id"],
+                wecom_enabled,
+                bool(wecom_webhook_url),
+                len(wecom_mentions))
+    # 如果启用了企业微信，强制触发配置更新（即使其他配置没变）
     configure_user_monitor(
         current_user["id"],
         telegram_bot_token=effective_token,
         telegram_chat_id=full_config.get("telegram_chat_id"),
         wallet_addresses=full_config.get("wallet_addresses", []),
         language=full_config.get("language", "zh"),
-        wecom_enabled=record.get("enabled", False),
-        wecom_webhook_url=record.get("webhook_url"),
-        wecom_mentions=record.get("mentions", []),
+        wecom_enabled=wecom_enabled,
+        wecom_webhook_url=wecom_webhook_url,
+        wecom_mentions=wecom_mentions,
     )
+    logger.info("WeCom config updated for user %s, monitor should send snapshot if enabled", current_user["id"])
     return _build_wecom_response(record)
 
 

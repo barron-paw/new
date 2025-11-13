@@ -174,23 +174,32 @@ class BinanceFollower:
             logger.debug("用户 %s 未能确定方向，事件 %s 已跳过。", self.user_id, event_type)
             return
 
+        client = self._ensure_client()
+        if client is None:
+            return
+
         quantity = self._calculate_quantity(trade_details, event)
         if quantity <= 0:
             logger.debug("用户 %s 在事件 %s 计算得到的下单量为 0，已跳过。", self.user_id, event_type)
             return
 
-        if config.min_order_size and quantity < config.min_order_size:
-            logger.info(
-                "用户 %s Binance 下单量 %.8f 低于最小阈值 %.8f，已跳过。",
-                self.user_id,
-                quantity,
-                config.min_order_size,
-            )
-            return
-
-        client = self._ensure_client()
-        if client is None:
-            return
+        # 检查最小下单量（USDT 转换为合约数量）
+        if config.min_order_size and config.min_order_size > 0:
+            min_contracts = self._usdt_to_contracts(client, symbol, config.min_order_size)
+            if min_contracts is None:
+                logger.warning("用户 %s 无法获取 %s 价格以检查最小下单量，已跳过。", self.user_id, symbol)
+                return
+            if quantity < min_contracts:
+                price = self._fetch_mark_price(client, symbol) or 0
+                logger.info(
+                    "用户 %s Binance 下单量 %.8f 合约（约 %.2f USDT）低于最小阈值 %.2f USDT（%.8f 合约），已跳过。",
+                    self.user_id,
+                    quantity,
+                    quantity * price,
+                    config.min_order_size,
+                    min_contracts,
+                )
+                return
 
         leverage = trade_details.get("leverage")
         if leverage:
@@ -279,6 +288,34 @@ class BinanceFollower:
             logger.error("获取用户 %s Binance 账户余额发生异常: %s", self.user_id, exc)
         return None
 
+    def _fetch_mark_price(self, client: Any, symbol: str) -> Optional[float]:
+        """获取 Binance 标记价格，用于将 USDT 金额转换为合约数量"""
+        try:
+            result = client.mark_price(symbol=symbol)
+            if isinstance(result, dict):
+                price = result.get("markPrice")
+                if price:
+                    return _float_or_zero(price)
+            elif isinstance(result, list) and result:
+                price = result[0].get("markPrice")
+                if price:
+                    return _float_or_zero(price)
+        except ClientError as exc:  # pragma: no cover - external API
+            logger.warning("获取用户 %s %s 标记价格失败: %s", self.user_id, symbol, exc.error_message)
+        except Exception as exc:
+            logger.warning("获取用户 %s %s 标记价格异常: %s", self.user_id, symbol, exc)
+        return None
+
+    def _usdt_to_contracts(self, client: Any, symbol: str, usdt_amount: float) -> Optional[float]:
+        """将 USDT 金额转换为合约数量"""
+        if usdt_amount <= 0:
+            return 0.0
+        price = self._fetch_mark_price(client, symbol)
+        if price is None or price <= 0:
+            logger.warning("用户 %s 无法获取 %s 价格，无法将 USDT 转换为合约数量", self.user_id, symbol)
+            return None
+        return usdt_amount / price
+
     def _check_stop_loss(self) -> bool:
         config = self._config
         client = self._ensure_client()
@@ -343,7 +380,17 @@ class BinanceFollower:
         if mode == "percentage":
             percent = config.amount
             return max(0.0, size * percent / 100.0)
-        return max(0.0, config.amount)
+        # 固定模式：config.amount 现在是 USDT 金额，需要转换为合约数量
+        client = self._ensure_client()
+        if client is None:
+            return 0.0
+        symbol = self._map_symbol(event.get("coin"))
+        if not symbol:
+            return 0.0
+        contracts = self._usdt_to_contracts(client, symbol, config.amount)
+        if contracts is None:
+            return 0.0
+        return max(0.0, contracts)
 
     def _determine_side(self, event_type: str, trade_details: Dict[str, Any], event: Dict[str, Any]) -> Optional[str]:
         side_hint = (trade_details.get("side") or "").upper()
@@ -373,13 +420,22 @@ class BinanceFollower:
             positions = client.position_risk(symbol=symbol)
             if isinstance(positions, list) and positions:
                 position_amt = abs(_float_or_zero(positions[0].get("positionAmt")))
-                if position_amt + quantity > config.max_position + 1e-8:
+                # 将最大持仓 USDT 转换为合约数量
+                max_contracts = self._usdt_to_contracts(client, symbol, config.max_position)
+                if max_contracts is None:
+                    logger.warning("用户 %s 无法获取 %s 价格以检查最大持仓，允许下单。", self.user_id, symbol)
+                    return True
+                if position_amt + quantity > max_contracts + 1e-8:
+                    price = self._fetch_mark_price(client, symbol) or 0
                     logger.info(
-                        "用户 %s 当前仓位 %.4f，加上计划下单 %.4f 将超过最大仓位 %.4f，已跳过。",
+                        "用户 %s 当前仓位 %.4f 合约（约 %.2f USDT），加上计划下单 %.4f 合约（约 %.2f USDT）将超过最大仓位 %.2f USDT（%.4f 合约），已跳过。",
                         self.user_id,
                         position_amt,
+                        position_amt * price,
                         quantity,
+                        quantity * price,
                         config.max_position,
+                        max_contracts,
                     )
                     return False
         except ClientError as exc:  # pragma: no cover - external API
